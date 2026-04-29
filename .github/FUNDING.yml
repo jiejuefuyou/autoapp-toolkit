@@ -1,0 +1,10 @@
+# GitHub Sponsors funding configuration
+# Enable Sponsors at github.com/settings/sponsors first, then this file becomes the
+# "Sponsor" button on the repo page. Until then, the file is harmless.
+
+github: jiejuefuyou
+# patreon: jiejuefuyou
+# open_collective: autoapp
+# ko_fi: jiejuefuyou
+# tidelift: npm/your-package
+# custom: ['https://autoappnotes.substack.com']
