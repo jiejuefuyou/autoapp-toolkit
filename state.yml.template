@@ -1,0 +1,73 @@
+# State template — copy to orchestrator/state.yml in your control directory.
+# Fill in identity + apps. Update as you go.
+# This is the SINGLE SOURCE OF TRUTH for your portfolio's status.
+
+version: 1
+last_updated: YYYY-MM-DD
+phase: 0
+phase_description: |
+  Phase 0 = scaffolds in place, awaiting Apple Developer enrollment + ASC API key.
+  Phase 1 = first app on TestFlight.
+  Phase 2 = first app on App Store.
+  Phase 3+ = adding more apps based on revenue data.
+
+identity:
+  apple_id: your-apple-developer-email@example.com
+  github: your-github-username
+  github_email: your-personal-email@example.com
+  bundle_id_prefix: com.yourname
+
+apps:
+  # Add one block per app. The agent updates these as the work progresses.
+  - slug: example-app
+    repo: your-github-username/example-app-repo
+    bundle_id: com.yourname.exampleapp
+    display_name: ExampleApp
+    pitch: One-liner of what this app does.
+    category: Productivity / Lifestyle / Utilities / Health & Fitness
+    monetization: one-time IAP $2.99 (com.yourname.exampleapp.premium)
+    stage: 02_scaffold_done
+    polish_status:
+      app_icon: implemented
+      onboarding: implemented
+      asc_metadata: complete (en-US)
+      release_lane: implemented
+    ci_verified: false
+    blocked_by:
+      - apple_developer_enrollment_pending
+    next_action: |
+      ASC API key arrives → run scripts/setup-asc-secrets.sh → tag v0.1.0
+
+candidate_apps:
+  # App ideas the agent has not yet scaffolded. Keep brief; full briefs go in reports/concept-*.md
+  []
+
+hard_gates:
+  # Things ONLY a human can do. Agent must stop here.
+  - id: human_apple_id_payment
+    description: Apple Developer enrollment + payment + banking + tax forms
+    state: in_progress | not_started | complete
+    user_action_required: enroll at developer.apple.com, complete banking in ASC
+
+  - id: asc_api_key
+    description: App Store Connect API .p8 + Key ID + Issuer ID
+    state: blocked_by_apple_developer
+    user_action_required: |
+      ASC > Users and Access > Keys > + > App Manager role > download .p8
+
+  - id: testflight_user_acceptance
+    description: human installs via TestFlight, validates app actually works
+    state: not_yet_due
+
+  - id: app_store_submit
+    description: final human ack before clicking submit-for-review
+    state: not_yet_due
+
+ci:
+  runner: macos-15
+  xcode: latest-stable
+  swift: "5.9+"
+  ios_min: "17.0"
+  signing: fastlane match (git storage)
+
+reports_dir: ../reports

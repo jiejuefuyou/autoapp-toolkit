@@ -1,0 +1,14 @@
+# Memory index template
+
+This file should live at `~/.claude/projects/<project-id>/memory/MEMORY.md`.
+Keep entries to one line each — agents truncate after ~200 lines.
+
+- [User persona](user-persona.md) — communication style, must be injected into subagent prompts
+- [Autonomy gates](feedback-autonomy.md) — what agent can / cannot decide alone
+- [Portfolio project](project-portfolio.md) — current state pointer; canonical state in `orchestrator/state.yml`
+- [Token economy](token-economy.md) — limit-aware operating mode + recovery protocol
+
+When you add new memory entries, follow the structure:
+- One link per line
+- Title — one-line hook describing relevance
+- Short enough that an agent re-entering can read all of memory in one go
