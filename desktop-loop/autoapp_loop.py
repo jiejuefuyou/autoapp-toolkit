@@ -174,32 +174,59 @@ def main() -> int:
         log(f"FAIL: missing dep {e}; pip install pyautogui pyperclip")
         return 1
 
-    pyautogui.PAUSE = 0.2
+    # Tighter pace = less visible flash. 0.2 -> 0.05 PAUSE,
+    # in-fire sleeps reduced. Total fire duration ~0.3s vs ~1.2s before.
+    pyautogui.PAUSE = 0.05
     pyautogui.FAILSAFE = True  # mouse to top-left corner aborts
 
     log(f"FIRE: idle={idle:.0f}s, prompt {len(prompt_text)} chars")
 
+    # Save current foreground window so we can restore focus after the fire.
+    # Without this, clicking the CC input box steals focus from whatever
+    # the user / system was doing — visible flash even when idle threshold
+    # passed (user might glance at screen mid-fire).
+    saved_hwnd = None
+    saved_mouse = None
+    if sys.platform == "win32":
+        try:
+            saved_hwnd = ctypes.windll.user32.GetForegroundWindow()
+            saved_mouse = pyautogui.position()
+        except Exception:
+            pass
+
     try:
+        # Pre-load clipboard before stealing focus — minimizes visible time.
+        pyperclip.copy(prompt_text)
+        time.sleep(0.05)
+
         # 1. Click the CC input area to focus it
         pyautogui.click(x=cfg["cc_input_x"], y=cfg["cc_input_y"])
-        time.sleep(0.4)
+        time.sleep(0.1)
 
-        # 2. Copy prompt to clipboard
-        pyperclip.copy(prompt_text)
-        time.sleep(0.2)
-
-        # 3. Paste with Ctrl+V
+        # 2. Paste + submit back-to-back (no time.sleep gaps the user can see)
         pyautogui.hotkey("ctrl", "v")
-        time.sleep(0.4)
-
-        # 4. Submit with Enter
+        time.sleep(0.1)
         pyautogui.press("enter")
+
+        # 3. Restore prior foreground + mouse position (Windows only).
+        # SetForegroundWindow has rules; best-effort, no error if it fails.
+        if sys.platform == "win32":
+            if saved_hwnd:
+                try:
+                    ctypes.windll.user32.SetForegroundWindow(saved_hwnd)
+                except Exception:
+                    pass
+            if saved_mouse:
+                try:
+                    pyautogui.moveTo(saved_mouse[0], saved_mouse[1], duration=0)
+                except Exception:
+                    pass
 
         # Mark fired + in-flight. The agent removes .inflight at tick end.
         last_fire_path.touch()
         if cfg.get("inflight_marker"):
             (ROOT / cfg["inflight_marker"]).touch()
-        log("DONE: prompt submitted (.inflight set)")
+        log("DONE: prompt submitted (.inflight set, focus restored)")
     except Exception as e:
         log(f"FAIL: {e}")
         return 1
