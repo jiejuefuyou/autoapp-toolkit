@@ -108,30 +108,62 @@ def main() -> int:
         log(f"SKIP: user active (idle={idle:.0f}s < threshold {cfg['idle_threshold_seconds']}s)")
         return 0
 
-    # Foreground-aware fire gate (Windows only).
-    # Even with focus restore, clicking into VSCode briefly activates its
-    # window — the user sees a flash. Avoid this by only firing when:
-    #   (a) VSCode is ALREADY foreground (no swap, no flash), OR
-    #   (b) user has been idle long enough that they're truly away
-    #       (configurable, default 600s = 10 min — well past any "AFK for coffee").
-    # If neither, skip. Eliminates the "popup while I'm working in another app"
-    # complaint at the cost of slower fires when user is actively in another app.
+    # === No-popup fire gate (Windows only) ===
+    # User-reported issue: even with focus restore + foreground check, fires
+    # still cause visible flashes because clicking into VSCode briefly
+    # activates the window (the activation animation IS the popup).
+    #
+    # Definitive fix: fire is allowed ONLY when ALL chance of user noticing
+    # is gone. Three conditions; ANY ONE allows fire:
+    #   (a) Screen is locked (Win+L state) — user definitionally absent
+    #   (b) VSCode is already the foreground window — clicking it doesn't
+    #       cause window activation (already active)
+    #   (c) idle > require_screen_locked_unless_idle_seconds (default 1800s
+    #       = 30 min, well past coffee/lunch break)
+    #
+    # Defaults are conservative: prefer "agent fires less often" over
+    # "agent flashes my screen". Set require_screen_locked=false in config
+    # to disable (a)+(c) and rely only on (b)+idle threshold.
     if sys.platform == "win32":
+        require_lock = cfg.get("require_screen_locked", True)
+        idle_unlock_override = cfg.get("require_screen_locked_unless_idle_seconds", 1800)
         vscode_substr = cfg.get("vscode_window_substring", "Visual Studio Code")
-        idle_for_swap = cfg.get("idle_seconds_for_window_swap", 600)
         try:
             user32 = ctypes.windll.user32
+            # Check (a): screen locked. OpenInputDesktop fails when locked
+            # (winlogon owns the input desktop, non-elevated proc can't open).
+            DESKTOP_READOBJECTS = 0x0001
+            hdesk = user32.OpenInputDesktopW(0, False, DESKTOP_READOBJECTS) if hasattr(user32, "OpenInputDesktopW") \
+                else user32.OpenInputDesktop(0, False, DESKTOP_READOBJECTS)
+            screen_locked = (hdesk == 0)
+            if hdesk:
+                user32.CloseDesktop(hdesk)
+
+            # Check (b): VSCode foreground
             hwnd = user32.GetForegroundWindow()
             length = user32.GetWindowTextLengthW(hwnd)
             buf = ctypes.create_unicode_buffer(length + 1)
             user32.GetWindowTextW(hwnd, buf, length + 1)
             title = buf.value
             in_vscode = vscode_substr.lower() in title.lower()
-            if not in_vscode and idle < idle_for_swap:
-                log(f"SKIP: foreground='{title[:40]}' not VSCode and idle {idle:.0f}s < {idle_for_swap}s — would flash")
+
+            # Check (c): idle long enough
+            very_idle = idle >= idle_unlock_override
+
+            allow_fire = screen_locked or in_vscode or very_idle or not require_lock
+            if not allow_fire:
+                reasons = []
+                if not screen_locked: reasons.append("not locked")
+                if not in_vscode: reasons.append(f"fg='{title[:30]}'")
+                if not very_idle: reasons.append(f"idle {idle:.0f}<{idle_unlock_override}")
+                log(f"SKIP: no-popup gate ({', '.join(reasons)}) — would flash")
                 return 0
+            else:
+                # Log which condition allowed fire (helps debugging)
+                why = "locked" if screen_locked else ("vscode-fg" if in_vscode else ("very-idle" if very_idle else "gate-disabled"))
+                log(f"GATE PASSED: {why} (idle={idle:.0f}s, fg='{title[:30]}')")
         except Exception as e:
-            log(f"WARN: foreground check failed ({e}) — proceeding anyway")
+            log(f"WARN: no-popup gate failed ({e}) — proceeding anyway")
 
     # Min interval between fires
     last_fire_path = ROOT / cfg["last_fire_marker"]

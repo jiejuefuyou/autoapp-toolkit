@@ -9,5 +9,6 @@
   "cc_busy_check_file": "../INBOX/STATUS.md",
   "post_status_grace_minutes": 5,
   "vscode_window_substring": "Visual Studio Code",
-  "idle_seconds_for_window_swap": 600
+  "require_screen_locked": true,
+  "require_screen_locked_unless_idle_seconds": 1800
 }
