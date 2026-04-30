@@ -48,6 +48,16 @@ memory-templates/
   token-economy.md        — Active / Conservative / Recovery operating modes + rolling-window protocol.
   MEMORY.md.template      — The index that lives at ~/.claude/projects/<id>/memory/MEMORY.md
 
+desktop-loop/
+  autoapp_loop.py         — PyAutoGUI-based "body" for the agent. Solves Claude Code's hard limit:
+                            CronCreate jobs are session-only and die when VSCode pauses. This script
+                            runs via Windows Task Scheduler, simulates click+paste+Enter into the CC
+                            input box. Idle-protected (silent skip when you're at the keyboard).
+                            One-second pause via `pause.lock` file. 24/7 uses your Pro subscription
+                            tokens, NOT the API.
+  SETUP.md                — Coordinate measurement + Task Scheduler registration walkthrough.
+  config.json.template    — Per-user config (CC input box xy, idle threshold, fire interval).
+
 state.yml.template        — Single source of truth template. Copy + fill identity + apps.
 ```
 
