@@ -136,6 +136,61 @@ Get-Content C:\Users\sh199\Desktop\autoapp\desktop-loop\loop.log -Tail 20
 
 这是 trade-off：用 30-60 分钟一次性配置 + 偶尔重测，换来 24/7 不消耗 API token 的循环。
 
+## No-popup gate（2026-04-30 更新）
+
+默认配置下 fire 只发生在三种"用户绝对看不到"的场景之一：
+
+| 条件 | 触发 | 例子 |
+|---|---|---|
+| (a) 屏幕锁定 | Win+L 锁屏后 | 你出门吃饭 |
+| (b) VSCode foreground | CC panel 已打开当前 active | 你正在看 CC 输出 |
+| (c) idle ≥ 1800s (30 min) | 久未操作 | 你忘了关电脑去开会 |
+
+如果三个都不满足 → SKIP，**不会 fire 触发任何 popup/抢焦点**。
+
+### 三个新 config 项
+
+```json
+{
+  "require_screen_locked": true,
+  "require_screen_locked_unless_idle_seconds": 1800,
+  "vscode_window_substring": "Visual Studio Code"
+}
+```
+
+- `require_screen_locked: false` → 关闭 (a)+(c)，仅靠 (b) — 工作时几乎不 fire
+- `require_screen_locked_unless_idle_seconds` → idle 多久后即使解锁也允许 fire（默认 30 min）
+
+### 验证方法
+
+```powershell
+# 临时把 idle threshold 设 0，跑一次脚本，看 log
+cd C:\Users\sh199\Desktop\autoapp\desktop-loop
+python autoapp_loop.py
+# 检查 loop.log 末尾 — 应该看到 SKIP: no-popup gate (...) 而不是 FIRE
+```
+
+如果想测试"屏幕锁定时 fire 真的能触发"：
+1. 解锁状态下手动开 ScheduledTask 跑一次（应 SKIP）
+2. Win+L 锁屏
+3. 等 1-2 分钟
+4. 解锁
+5. 看 loop.log → 应该有 FIRE 记录（在你锁屏期间发生的）
+
+## 三层 busy 检测
+
+加在 fire gate 之后，独立判断"CC 有没有在干活"：
+
+| 层 | 判断 | 用途 |
+|---|---|---|
+| Layer 1 | `.inflight` marker exists | agent 显式信号"我在干活" |
+| Layer 2 | STATUS.md mtime < grace 5min | agent 刚 append 过 |
+| Layer 3 | .last-fire mtime > STATUS.md mtime | agent 还没 append |
+
+任一触发 → SKIP 防止双重 prompt 干扰 agent。
+
+agent 在 cron-prompt 里被指示 tick 末执行 `rm desktop-loop/.inflight`。如果忘了 → loop 永远 SKIP（intentional：宁可死锁也不双 fire）。
+
 ## 下一步
 
 配完后告诉 CC "desktop loop 已配 + task scheduler 已开启"。CC 可以删除当前 session-only cron。
