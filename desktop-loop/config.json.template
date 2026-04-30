@@ -7,5 +7,7 @@
   "last_fire_marker": ".last-fire",
   "inflight_marker": ".inflight",
   "cc_busy_check_file": "../INBOX/STATUS.md",
-  "post_status_grace_minutes": 5
+  "post_status_grace_minutes": 5,
+  "vscode_window_substring": "Visual Studio Code",
+  "idle_seconds_for_window_swap": 600
 }

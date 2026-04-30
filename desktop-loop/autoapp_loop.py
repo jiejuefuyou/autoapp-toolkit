@@ -108,6 +108,31 @@ def main() -> int:
         log(f"SKIP: user active (idle={idle:.0f}s < threshold {cfg['idle_threshold_seconds']}s)")
         return 0
 
+    # Foreground-aware fire gate (Windows only).
+    # Even with focus restore, clicking into VSCode briefly activates its
+    # window — the user sees a flash. Avoid this by only firing when:
+    #   (a) VSCode is ALREADY foreground (no swap, no flash), OR
+    #   (b) user has been idle long enough that they're truly away
+    #       (configurable, default 600s = 10 min — well past any "AFK for coffee").
+    # If neither, skip. Eliminates the "popup while I'm working in another app"
+    # complaint at the cost of slower fires when user is actively in another app.
+    if sys.platform == "win32":
+        vscode_substr = cfg.get("vscode_window_substring", "Visual Studio Code")
+        idle_for_swap = cfg.get("idle_seconds_for_window_swap", 600)
+        try:
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            length = user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value
+            in_vscode = vscode_substr.lower() in title.lower()
+            if not in_vscode and idle < idle_for_swap:
+                log(f"SKIP: foreground='{title[:40]}' not VSCode and idle {idle:.0f}s < {idle_for_swap}s — would flash")
+                return 0
+        except Exception as e:
+            log(f"WARN: foreground check failed ({e}) — proceeding anyway")
+
     # Min interval between fires
     last_fire_path = ROOT / cfg["last_fire_marker"]
     if last_fire_path.exists():
