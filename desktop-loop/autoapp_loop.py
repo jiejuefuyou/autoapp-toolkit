@@ -36,6 +36,7 @@ DEFAULT_CONFIG = {
     "min_minutes_between_fires": 30,
     "prompt_file": "../orchestrator/cron-prompt.txt",
     "last_fire_marker": ".last-fire",
+    "cc_busy_check_file": "../INBOX/STATUS.md",
 }
 
 
@@ -52,15 +53,28 @@ class LASTINPUTINFO(ctypes.Structure):
 
 
 def get_idle_seconds() -> float:
-    """Seconds since the user's last mouse / keyboard input (Windows-only)."""
-    if sys.platform != "win32":
-        return 0.0
-    lii = LASTINPUTINFO()
-    lii.cbSize = ctypes.sizeof(lii)
-    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
-        return 0.0
-    millis_since_input = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
-    return millis_since_input / 1000.0
+    """Seconds since the user's last mouse / keyboard input."""
+    if sys.platform == "win32":
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(lii)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+            return 0.0
+        millis_since_input = ctypes.windll.kernel32.GetTickCount() - lii.dwTime
+        return millis_since_input / 1000.0
+    if sys.platform == "darwin":
+        # Requires `pip install pyobjc-framework-Quartz`
+        try:
+            from Quartz import (
+                CGEventSourceSecondsSinceLastEventType,
+                kCGAnyInputEventType,
+                kCGEventSourceStateHIDSystemState,
+            )
+            return CGEventSourceSecondsSinceLastEventType(
+                kCGEventSourceStateHIDSystemState, kCGAnyInputEventType
+            )
+        except ImportError:
+            return 0.0
+    return 0.0  # linux/other: stub
 
 
 def load_config() -> dict:
@@ -102,6 +116,19 @@ def main() -> int:
         if elapsed < min_seconds:
             log(f"SKIP: too soon since last fire ({elapsed/60:.1f}min < {cfg['min_minutes_between_fires']}min)")
             return 0
+
+    # CC busy detection: if .last-fire mtime > STATUS.md mtime, CC hasn't appended
+    # progress yet from the previous fire — it's still working. Don't double-poke.
+    busy_check = cfg.get("cc_busy_check_file")
+    if busy_check and last_fire_path.exists():
+        status_path = (ROOT / busy_check).resolve()
+        if status_path.exists():
+            last_fire_mtime = last_fire_path.stat().st_mtime
+            status_mtime = status_path.stat().st_mtime
+            if last_fire_mtime > status_mtime:
+                gap = (last_fire_mtime - status_mtime) / 60
+                log(f"SKIP: CC still busy (last fire +{gap:.1f}min ago, STATUS.md not updated since)")
+                return 0
 
     # Prompt file
     prompt_path = (ROOT / cfg["prompt_file"]).resolve()
