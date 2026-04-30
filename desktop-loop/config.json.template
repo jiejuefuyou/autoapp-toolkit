@@ -1,8 +1,11 @@
 {
-  "cc_input_x": 0,
-  "cc_input_y": 0,
+  "cc_input_x": 3136,
+  "cc_input_y": 882,
   "idle_threshold_seconds": 180,
   "min_minutes_between_fires": 30,
   "prompt_file": "../orchestrator/cron-prompt.txt",
-  "last_fire_marker": ".last-fire"
+  "last_fire_marker": ".last-fire",
+  "inflight_marker": ".inflight",
+  "cc_busy_check_file": "../INBOX/STATUS.md",
+  "post_status_grace_minutes": 5
 }

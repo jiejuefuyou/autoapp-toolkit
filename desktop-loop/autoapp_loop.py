@@ -117,10 +117,35 @@ def main() -> int:
             log(f"SKIP: too soon since last fire ({elapsed/60:.1f}min < {cfg['min_minutes_between_fires']}min)")
             return 0
 
-    # CC busy detection: if .last-fire mtime > STATUS.md mtime, CC hasn't appended
-    # progress yet from the previous fire — it's still working. Don't double-poke.
+    # Layer 1 busy: explicit .inflight marker. The agent prompt instructs CC to
+    # `touch .inflight` at tick start and `rm .inflight` at tick end. If present,
+    # CC is still mid-work — never fire. (Survives across STATUS.md being
+    # appended early in the tick.)
+    inflight_marker = cfg.get("inflight_marker")
+    if inflight_marker:
+        inflight_path = ROOT / inflight_marker
+        if inflight_path.exists():
+            age = (time.time() - inflight_path.stat().st_mtime) / 60
+            log(f"SKIP: .inflight present (age {age:.1f}min) — CC mid-tick")
+            return 0
+
+    # Layer 2 busy: STATUS.md was modified recently. Even after the agent
+    # appends its progress note, give it a grace window before allowing the
+    # next fire — appending is usually one of the LAST things in a tick but
+    # not literally last (commits, log inspection often follow).
     busy_check = cfg.get("cc_busy_check_file")
-    if busy_check and last_fire_path.exists():
+    grace_min = cfg.get("post_status_grace_minutes", 5)
+    if busy_check:
+        status_path = (ROOT / busy_check).resolve()
+        if status_path.exists():
+            status_age_min = (time.time() - status_path.stat().st_mtime) / 60
+            if status_age_min < grace_min:
+                log(f"SKIP: STATUS.md modified {status_age_min:.1f}min ago < grace {grace_min}min")
+                return 0
+
+    # Layer 3 busy: original check — if .last-fire newer than STATUS.md, the
+    # agent never finished its accounting from the previous fire.
+    if last_fire_path.exists() and busy_check:
         status_path = (ROOT / busy_check).resolve()
         if status_path.exists():
             last_fire_mtime = last_fire_path.stat().st_mtime
@@ -170,9 +195,11 @@ def main() -> int:
         # 4. Submit with Enter
         pyautogui.press("enter")
 
-        # Mark fired
+        # Mark fired + in-flight. The agent removes .inflight at tick end.
         last_fire_path.touch()
-        log("DONE: prompt submitted")
+        if cfg.get("inflight_marker"):
+            (ROOT / cfg["inflight_marker"]).touch()
+        log("DONE: prompt submitted (.inflight set)")
     except Exception as e:
         log(f"FAIL: {e}")
         return 1
