@@ -136,6 +136,31 @@ Get-Content C:\Users\sh199\Desktop\autoapp\desktop-loop\loop.log -Tail 20
 
 这是 trade-off：用 30-60 分钟一次性配置 + 偶尔重测，换来 24/7 不消耗 API token 的循环。
 
+## ⚠️ 关键：必须用 pythonw.exe，不是 python.exe
+
+如果你用 `python.exe`（默认）注册 Task Scheduler，**每次 fire 会闪一个黑色 console 窗口** ~100-300ms — 即使脚本 SKIP 也会闪（因为闪窗是 python 进程本身启动的，不是脚本逻辑）。
+
+**正确注册方式**：
+```powershell
+$action = New-ScheduledTaskAction `
+    -Execute "C:\path\to\.venv\Scripts\pythonw.exe" `   # ← 重点：pythonw 不是 python
+    -Argument "C:\path\to\desktop-loop\autoapp_loop.py" `
+    -WorkingDirectory "C:\path\to\desktop-loop"
+
+$settings = New-ScheduledTaskSettingsSet `
+    -Hidden `                          # ← 重点：Hidden=True
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+```
+
+`pythonw.exe` 是 Python 自带的"无控制台"版本，每个 venv 的 `Scripts/` 下都有。功能等价于 python.exe 但不创建 console 窗口。
+
+**症状对照**：
+- ❌ 用 python.exe 注册 → 每分钟黑窗闪一下（用户报告"弹窗一会一弹"）
+- ✅ 用 pythonw.exe + Hidden=True 注册 → 完全静默
+
+**注意**：pythonw 没有 stdout，所以脚本里的 `print()` 会被丢弃（不报错）。本脚本所有重要 log 都写文件 (`loop.log`)，不依赖 stdout，所以兼容。
+
 ## No-popup gate（2026-04-30 更新）
 
 默认配置下 fire 只发生在三种"用户绝对看不到"的场景之一：
