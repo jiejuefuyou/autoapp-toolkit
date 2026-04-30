@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd plist template for the autoapp_loop on macOS.
+  Replace USERNAME and verify the python path before installing.
+  Install at: ~/Library/LaunchAgents/com.autoapp.loop.plist
+  Then: launchctl load -w ~/Library/LaunchAgents/com.autoapp.loop.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.autoapp.loop</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/USERNAME/.venv/bin/python</string>
+        <string>/Users/USERNAME/autoapp/desktop-loop/autoapp_loop.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/USERNAME/autoapp/desktop-loop</string>
+
+    <!-- Fire every 60 seconds; the script's own throttling decides if a real fire happens. -->
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <!-- Don't keep alive — single-shot execution per StartInterval -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Log stdout/stderr alongside the script's loop.log for debugging. -->
+    <key>StandardOutPath</key>
+    <string>/Users/USERNAME/autoapp/desktop-loop/launchd.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/USERNAME/autoapp/desktop-loop/launchd.stderr.log</string>
+
+    <!-- Don't run if the system is overloaded -->
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>
