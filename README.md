@@ -193,6 +193,78 @@ All four pass `verify_all.sh` and are awaiting their first signed TestFlight bui
 
 ---
 
+
+
+---
+
+## Lessons learned (2026-05 update)
+
+### `fastlane match` on macos-15 + GitHub Actions: use SSH deploy keys, not PATs
+
+Fine-grained GitHub PATs fail unreliably on `macos-15` GitHub Actions runners
+when used as basic-auth in HTTPS git URLs for `fastlane match`. The exact
+failure: `git clone https://user:token@github.com/...` returns HTTP 400 from
+runner, but works locally with the same PAT. We burned 9 fix iterations
+(rotated PAT, x-access-token user, disable osxkeychain, unset extraheader,
+explicit URL injection, etc.) before pivoting to SSH deploy keys.
+
+The fix takes 5 minutes:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/match_deploy -N "" -C "fastlane-match-deploy"
+PUB=$(cat ~/.ssh/match_deploy.pub)
+gh api -X POST repos/myorg/match-storage/keys   -f title='fastlane-match-deploy' -F read_only=false -f key="$PUB"
+SSH_B64=$(base64 -w 0 ~/.ssh/match_deploy)
+echo "$SSH_B64" | gh secret set MATCH_SSH_KEY -R myorg/app1 --env testflight
+# (repeat for each consuming repo)
+```
+
+Then in your `init_signing.yml`:
+
+```yaml
+- name: Setup SSH deploy key
+  env:
+    MATCH_SSH_KEY: ${{ secrets.MATCH_SSH_KEY }}
+  run: |
+    mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    echo "$MATCH_SSH_KEY" | base64 -d > ~/.ssh/match_deploy
+    chmod 600 ~/.ssh/match_deploy
+    ssh-keyscan github.com >> ~/.ssh/known_hosts
+    cat > ~/.ssh/config <<EOF
+    Host github.com
+      User git
+      IdentityFile ~/.ssh/match_deploy
+      IdentitiesOnly yes
+    EOF
+
+- name: fastlane match
+  env:
+    MATCH_GIT_URL: git@github.com:myorg/match-storage.git
+    MATCH_GIT_BRANCH: main
+  run: bundle exec fastlane init_signing
+```
+
+Full debugging journey + 4 bonus issues (cert ceiling, missing actions,
+profile name with timestamp suffix, iPad orientation requirement) at
+[autoapp/reports/devto-article-14-asc-ssh-deploy-key-paste-ready.md](https://github.com/jiejuefuyou/autoapp/blob/main/reports/devto-article-14-asc-ssh-deploy-key-paste-ready.md).
+
+### Use `gh api` to do everything Apple's docs say "go to ASC web UI"
+
+Almost all "click in ASC dashboard" steps have a GitHub or ASC API equivalent.
+We've automated:
+- Adding deploy keys to private repos (`gh api`)
+- Creating internal beta groups (`v1/betaGroups` POST)
+- Adding internal testers + linking builds (`v1/betaTesters` + `relationships/individualTesters`)
+- Setting Test Information (`v1/betaAppLocalizations`)
+- Setting content rights declaration (`PATCH apps/{id}`)
+
+Reusable script: [autoapp/orchestrator/setup_asc_internal_tester.py](https://github.com/jiejuefuyou/autoapp/blob/main/orchestrator/setup_asc_internal_tester.py) — one command wires the entire TestFlight chain for any new app.
+
+The principle: **if Apple's docs say "click here in ASC", check the ASC API
+first**. 90% of the time there's an endpoint, and 10% of the time there isn't
+but `gh api` handles the GitHub side regardless.
+
+
 ## License
 
 MIT. Fork, modify, ship your own portfolio. If it's useful, link back to this repo so others find it.
