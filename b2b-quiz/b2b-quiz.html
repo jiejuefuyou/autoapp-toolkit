@@ -1,0 +1,272 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Workflow Quiz -- 90% will be told not to buy from me (intentionally)</title>
+<meta name="description" content="Answer 5 questions, 90% will be told not to buy my prompt pack or coaching. Free, no signup, no cookie">
+<meta property="og:title" content="AI Workflow Quiz -- 90% will be told not to buy from me">
+<meta property="og:description" content="Answer 5 questions. 90% told NOT to buy my $9.99 pack, $99 coaching, or retainer. Free DIY quiz. No signup.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://jiejuefuyou.github.io/b2b-quiz.html">
+<meta property="og:image" content="https://jiejuefuyou.github.io/assets/og-default.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="AI Workflow Quiz -- 90% told not to buy from me">
+<meta name="twitter:description" content="90% told not to buy. 5-question quiz for SaaS teams. Free, no signup.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+<style>
+:root{--bg:#0a0a0f;--bg-card:#12121a;--border:#1f1f2e;--text:#e6e6f0;--muted:#8a8a9a;--accent:#6c4be0;--accent-2:#9b6cf0;--good:#4ade80;--warn:#fbbf24}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+a{color:var(--accent-2);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:640px;margin:0 auto;padding:60px 24px 80px}
+.back{color:var(--muted);font-size:.9rem;margin-bottom:32px;display:inline-block}
+header{padding-bottom:32px;border-bottom:1px solid var(--border);margin-bottom:40px;text-align:center}
+header h1{font-size:2rem;line-height:1.25;background:linear-gradient(135deg,#6c4be0,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header p{color:var(--text);margin-top:14px;font-size:1.05rem}
+header p.muted{color:var(--muted);margin-top:8px;font-size:.85rem}
+.en-intro{background:linear-gradient(135deg,rgba(108,75,224,.1),rgba(192,132,252,.04));border:1px solid rgba(108,75,224,.3);border-radius:12px;padding:20px 22px;margin-bottom:32px;font-size:.92rem;line-height:1.7;color:var(--text)}
+.en-intro p{margin-bottom:10px}
+.en-intro p:last-child{margin-bottom:0}
+.en-intro strong{color:var(--accent-2)}
+.en-intro .cta-row{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap}
+.en-intro .cta-pill{padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:white;border-radius:8px;font-size:.85rem;font-weight:600}
+.quiz-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:28px 24px;margin-bottom:20px}
+.q-num{color:var(--accent-2);font-size:.8rem;font-weight:600;letter-spacing:1px;margin-bottom:8px}
+.q-text{font-size:1.05rem;font-weight:500;margin-bottom:18px;line-height:1.5}
+.q-options{display:grid;gap:10px}
+.q-option{display:flex;align-items:center;padding:14px 16px;background:var(--bg);border:2px solid var(--border);border-radius:10px;cursor:pointer;font-size:.95rem;transition:border-color .15s,background .15s}
+.q-option:hover{border-color:var(--accent-2)}
+.q-option input{margin-right:12px;accent-color:var(--accent);transform:scale(1.2)}
+.q-option label{cursor:pointer;flex:1;line-height:1.4}
+.q-option:has(input:checked){border-color:var(--accent);background:rgba(108,75,224,.1)}
+.progress-bar{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;height:6px;margin-bottom:32px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .3s;border-radius:8px}
+.result{background:linear-gradient(135deg,rgba(108,75,224,.12),rgba(192,132,252,.04));border:2px solid rgba(108,75,224,.5);border-radius:16px;padding:32px 28px;text-align:center;display:none}
+.result.show{display:block}
+.result-tier{font-size:2.5rem;margin-bottom:8px}
+.result-title{font-size:1.4rem;font-weight:700;color:var(--accent-2);margin-bottom:10px}
+.result-score{color:var(--muted);font-size:.9rem;margin-bottom:20px}
+.result-desc{color:var(--text);font-size:.95rem;line-height:1.6;text-align:left;margin-bottom:20px}
+.result-desc strong{color:var(--accent-2)}
+.result-next{background:var(--bg);border-radius:8px;padding:16px 18px;text-align:left;margin-bottom:20px}
+.result-next h4{color:var(--accent-2);font-size:.9rem;margin-bottom:8px}
+.result-next ul{margin-left:18px;color:var(--text);font-size:.88rem}
+.result-next li{margin-bottom:5px}
+.result-cta{display:inline-block;padding:14px 28px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:white;border-radius:10px;font-weight:600;font-size:1rem;margin-bottom:10px}
+.result-cta:hover{text-decoration:none;transform:translateY(-1px)}
+.result-alt{display:block;margin-top:16px;font-size:.88rem;color:var(--muted)}
+.tier-a{border-color:rgba(74,222,128,.4);background:linear-gradient(135deg,rgba(74,222,128,.08),rgba(74,222,128,.02))}
+.tier-a .result-title{color:var(--good)}
+.tier-b{border-color:rgba(255,181,71,.4);background:linear-gradient(135deg,rgba(255,181,71,.08),rgba(255,181,71,.02))}
+.tier-b .result-title{color:var(--warn)}
+.tier-c{border-color:rgba(192,132,252,.5);background:linear-gradient(135deg,rgba(192,132,252,.12),rgba(108,75,224,.04))}
+.tier-c .result-title{color:#c084fc}
+.trust-bar{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:28px;padding:14px 18px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px}
+.trust-item{font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:5px}
+.trust-item .icon{font-size:1rem}
+.results-breakdown{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:20px 22px;margin-top:28px}
+.results-breakdown h3{color:var(--accent-2);font-size:.95rem;margin-bottom:14px}
+.breakdown-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+@media(max-width:500px){.breakdown-grid{grid-template-columns:1fr}}
+.b-item{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 10px;text-align:center}
+.b-item .b-tier{font-size:.75rem;font-weight:700;letter-spacing:.5px;margin-bottom:4px}
+.b-item .b-title{font-size:.82rem;color:var(--text);font-weight:500;margin-bottom:4px}
+.b-item .b-cta{font-size:.75rem;color:var(--accent-2);display:block;margin-top:4px}
+.b-item.tier-a .b-tier{color:var(--good)}
+.b-item.tier-b .b-tier{color:var(--warn)}
+.b-item.tier-c .b-tier{color:#c084fc}
+.cta-box{background:linear-gradient(135deg,rgba(108,75,224,.15),rgba(192,132,252,.06));border:1px solid rgba(108,75,224,.3);padding:24px;border-radius:12px;margin-top:32px;text-align:center}
+.cta-box h3{color:#fff;margin-bottom:10px}
+.cta-box p{color:var(--muted);font-size:.9rem}
+.share-row{display:flex;gap:10px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+.share-btn{padding:8px 16px;border-radius:8px;font-size:.85rem;font-weight:500;cursor:pointer;border:none;color:white;opacity:.85;transition:opacity .15s}
+.share-btn:hover{opacity:1}
+.email-capture{background:linear-gradient(135deg,rgba(74,222,128,.08),rgba(74,222,128,.02));border:1px solid rgba(74,222,128,.3);border-radius:12px;padding:20px 22px;margin-top:20px;text-align:left}
+.email-capture p{color:var(--text)}
+.email-capture input[type="email"]{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;margin-bottom:10px;box-sizing:border-box;display:block}
+.email-capture button{width:100%;padding:10px 16px;background:linear-gradient(135deg,var(--good),#22c55e);color:#000;border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;display:block}
+.email-success{color:var(--good);font-size:.88rem;padding:10px;text-align:center}
+.share-btn.x{background:#000}.share-btn.linkedin{background:#0a66a2}.share-btn.copy{background:var(--bg-card);border:1px solid var(--border);color:var(--text)}
+footer{margin-top:60px;padding-top:24px;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem;text-align:center}
+@media(max-width:600px){.wrap{padding:40px 16px 60px}header h1{font-size:1.6rem}.quiz-card{padding:20px 16px}.en-intro{padding:16px 16px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<a href="services.html" class="back">&larr; B2B Consulting</a>
+<header>
+<h1>Your AI Workflow Quiz</h1>
+<p>5 questions, 90% will be told not to buy from me (intentionally)</p>
+<p class="muted">5 min &nbsp;|&nbsp; No signup &nbsp;|&nbsp; No cookie</p>
+</header>
+
+<div class="en-intro">
+<p><strong>Built this after sending 200+ cold emails.</strong> Most people who came to my site didn't know if they needed a $9.99 prompt pack, a $99 diagnostic call, or a 3-8k/month retainer.</p>
+<p>This quiz answers that in 90 seconds -- and tells you to <em>not</em> buy from me 70% of the time.</p>
+<div class="cta-row">
+<span class="cta-pill">5 questions . 90 seconds . free</span>
+</div>
+</div>
+
+<div class="trust-bar">
+<span class="trust-item"><span class="icon">No login required</span></span>
+<span class="trust-item"><span class="icon">No cookies</span></span>
+<span class="trust-item"><span class="icon">Mobile-friendly</span></span>
+<span class="trust-item"><span class="icon">Tells you NOT to buy 70% of the time</span></span>
+</div>
+
+<div class="progress-bar"><div class="progress-fill" id="progress" style="width:0%"></div></div>
+<div class="quiz-card" id="quiz"></div>
+<div class="result" id="result"></div>
+
+<div class="results-breakdown" id="breakdown">
+<h3>Share your quiz result</h3>
+<div class="breakdown-grid">
+<div class="b-item tier-a"><div class="b-tier">Tier A . 0-3 pts</div><div class="b-title">Prompt Vault Master, Best Value</div><a href="https://jiejuefuyou.gumroad.com/l/prompt-vault-master?utm_source=site&utm_medium=b2b-quiz&utm_campaign=tier-a-breakdown" class="b-cta" target="_blank" rel="noopener">$9.99 Master &rarr;</a><div style="margin-top:6px"><a href="https://jiejuefuyou.gumroad.com/l/prompt-vault-complete?utm_source=site&utm_medium=b2b-quiz&utm_campaign=bundle-cta" style="font-size:.72rem;color:var(--good)">or $25 all 4 packs &rarr;</a></div></div>
+<div class="b-item tier-b">
+<div class="b-tier">Tier B . 4-6 pts</div>
+<div class="b-title">Coaching -- Full AI Workflow Analysis</div>
+<a href="mailto:jiejuefuyou@gmail.com?subject=Action%20Package%20%E2%80%94%20AI%20Workflow%20Assessment&body=Hi%20Sun%2C%0A%0AI%20took%20the%20AI%20Workflow%20Quiz%20and%20got%20Tier%20B.%0A%0AMy%20team%20size%3A%20%5Byour%20number%5D%0AIndustry%3A%20%5Byour%20market%5D%0A%0ALooking%20for%20a%2030-minute%20coaching%20session.%0A%0ABest%20times%3A%20%5Bany%20time%5D%0A%0AThanks" class="b-cta">Book $99 coaching &rarr;</a>
+</div>
+<div class="b-item tier-c">
+<div class="b-tier">Tier C . 7-10 pts</div>
+<div class="b-title">AI Ops Retainer -- Systematic Efficiency</div>
+<a href="mailto:jiejuefuyou@gmail.com?subject=30min%20Consulting%20%E2%80%94%20Tier%20C%20AI%20Workflow%20Assessment&body=Hi%20Sun%2C%0A%0AI%20took%20the%20AI%20Workflow%20Quiz%20and%20got%20Tier%20C.%20I%20already%20have%20structure%20in%20place.%0A%0AMy%20use%20case%3A%20%5Bcustomer-facing%2Fcontent%2Freports%2C%20etc%5D%0ABudget%3A%20%5Byour%20range%5D%0A%0AInterested%20in%20a%2030-minute%20session%20to%20go%20deeper.%0A%0AThanks" class="b-cta">Book 30min call &rarr;</a>
+</div>
+</div>
+</div>
+
+<div class="email-capture" id="email-capture" style="display:none">
+<p style="margin-bottom:8px"><strong style="color:var(--good)">Get your free 3-step AI roadmap</strong></p>
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:12px">Based on your answers, I will send a personalized plan. No sales pitch.</p>
+<input type="email" id="quiz-email" placeholder="your@email.com" style="display:block;width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.9rem;margin-bottom:10px;box-sizing:border-box">
+<button onclick="submitEmail()" style="display:block;width:100%;padding:10px 16px;background:linear-gradient(135deg,var(--good),#22c55e);color:#000;border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;margin-bottom:8px">Send my roadmap</button>
+<p id="email-success" class="email-success" style="display:none">Sent! Check your inbox.</p>
+<p style="color:var(--muted);font-size:.75rem">No spam. Unsubscribe anytime.</p>
+</div>
+
+<div class="cta-box" id="share-box"  style="display:none">
+  <h3>Your result is ready</h3>
+  <p>Share your result with your network or save for later</p>
+  <div class="share-row">
+    <button class="share-btn x" onclick="shareX()">Share on X</button>
+    <button class="share-btn linkedin" onclick="shareLinkedIn()">LinkedIn</button>
+    <button class="share-btn copy" onclick="copyResult()">Copy result</button>
+  </div>
+</div>
+<footer>
+<p>jiejuefuyou &nbsp;|&nbsp; <a href="services.html">B2B Consulting</a> &nbsp;|&nbsp; <a href="zh.html">Chinese Site</a> &nbsp;|&nbsp; <a href="https://github.com/jiejuefuyou">GitHub</a></p>
+</footer>
+</div>
+<script>
+var QUESTIONS=[
+  {text:"How many AI tools does your team use repeatedly each week?",options:[
+    {label:"Not many -- just general ChatGPT",value:0},
+    {label:"3-5 -- know some tools, some gaps",value:1},
+    {label:"6+ -- use curated tool lists",value:2}
+  ]},
+  {text:"What is your company's current AI tool maturity level?",options:[
+    {label:"Not so good -- not sure how",value:0},
+    {label:"Already compared methods, have some tools",value:1},
+    {label:"Already systematic, business results stable",value:2}
+  ]},
+  {text:"How much time does your team spend on repetitive tasks per week?",options:[
+    {label:"Every hour is almost like burning money",value:0},
+    {label:"1-3 hours, the budget is considerable",value:1},
+    {label:"3+ hours, 2 people working on it",value:2}
+  ]},
+  {text:"When AI can save 50-70% of your time, what's your biggest concern?",options:[
+    {label:"AI generates wrong customer-facing content",value:0},
+    {label:"Can't verify AI output quality consistently",value:1},
+    {label:"Can't calculate ROI / self-check mistakes",value:2}
+  ]},
+  {text:"What is your company's AI maturity stage?",options:[
+    {label:"One-person company, AI only assists with typing",value:0},
+    {label:"Small team, AI handles multiple tasks systematically",value:1},
+    {label:"Already have a structured AI ops system",value:2}
+  ]}
+];
+var TIERS=[
+  {min:0,max:3,tier:"Tier A",title:"AI Roadmap -- Early Stage",cssClass:"tier-a",scoreText:"Your score: 0-3 / 10",
+   desc:"You're still in the <strong>early exploration phase</strong>. Before hiring a consultant or buying a toolkit, you need a structured approach -- not more tools.",
+   nextItems:["Try the Prompt Vault Master (160+ EN/ZH prompts) to get started","Use 1-2 prompts to write your first outreach draft / social copy","Start small, validate the workflow before scaling"],
+   cta:"See Prompt Vault ($9.99)",ctaHref:"https://jiejuefuyou.gumroad.com/l/prompt-vault-master?utm_source=site&utm_medium=b2b-quiz&utm_campaign=tier-a-result",
+   alt:"Also try the <a href='quote-calculator.html' style='color:var(--accent-2)'>ROI calculator</a> to estimate your time ROI"},
+  {min:4,max:6,tier:"Tier B",title:"AI Workflow -- Getting Started",cssClass:"tier-b",scoreText:"Your score: 4-6 / 10",
+   desc:"You already know the <strong>missing piece is a structured process</strong>. What you need is a 30-minute coaching call + 1 PDF to get unstuck.",
+   nextItems:["Book the $99 coaching call to get unblocked fast (usually fixed in 1 session)","Pre-book the 30-min call -- most clients solve their blocker in 1 session","Start with the PDF and DIY -- or switch to a retainer if it compounds"],
+   cta:"Book 30 min coaching ($99)",ctaHref:"mailto:jiejuefuyou@gmail.com?subject=Action%20Package%20%E2%80%94%20AI%20Workflow%20Assessment&body=Hi%20Sun%2C%0A%0AI%20took%20the%20AI%20Workflow%20Quiz%20and%20got%20Tier%20B.%20I%27m%20interested%20in%20the%20Action%20Package.%0A%0ATeam%20size%3A%20%5Byour%20number%5D%0AIndustry%3A%20%5Byour%20market%5D%0A%0AThanks",
+   alt:"Also try the <a href='roi-calculator.html' style='color:var(--accent-2)'>ROI calculator</a> to estimate your time ROI"},
+  {min:7,max:10,tier:"Tier C",title:"You Already Have Structure",cssClass:"tier-c",scoreText:"Your score: 7-10 / 10",
+   desc:"You're <strong>already structured</strong> -- what you need is execution and refinement, not more strategy or tooling. Either pre-book a call to go deeper or come back when you hit a wall.",
+   nextItems:["Pre-book the 30 min call to go deeper (you're ready, save time)","Pre-book an hour call if you want to understand the real ROI","Next level: review the AI workflow map + execution timeline + next steps"],
+   cta:"Book 30 min now -- save time",ctaHref:"mailto:jiejuefuyou@gmail.com?subject=30min%20Consulting%20%E2%80%94%20Tier%20C%20AI%20Workflow%20Assessment&body=Hi%20Sun%2C%0A%0AI%20took%20the%20AI%20Workflow%20Quiz%20and%20got%20Tier%20C.%20I%20already%20have%20structure%20and%20want%20to%20go%20deeper.%0A%0AUse%20case%3A%20%5Bcustomer-facing%2Fcontent%2Freports%2C%20etc%5D%0ABudget%3A%20%5Byour%20range%5D%0A%0AInterested%20in%20a%2030-minute%20session.%0A%0AThanks",
+   alt:"Also try the <a href='quote-calculator.html' style='color:var(--accent-2)'>ROI calculator</a> to estimate your ROI"}
+];
+var currentQ=0,answers=[];
+function renderQuestion(){
+  var q=QUESTIONS[currentQ];
+  document.getElementById('progress').style.width=((currentQ/QUESTIONS.length)*100)+'%';
+  var html='<div class="q-num">Question '+(currentQ+1)+' of '+QUESTIONS.length+'</div><div class="q-text">'+q.text+'</div><div class="q-options">';
+  for(var i=0;i<q.options.length;i++){
+    html+='<div class="q-option"><input type="radio" name="q'+currentQ+'" id="q'+currentQ+'_'+i+'" value="'+q.options[i].value+'" onchange="selectAnswer('+q.options[i].value+')"><label for="q'+currentQ+'_'+i+'">'+q.options[i].label+'</label></div>';
+  }
+  html+='</div>';
+  document.getElementById('quiz').innerHTML=html;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function selectAnswer(v){answers[currentQ]=v;setTimeout(function(){if(currentQ<QUESTIONS.length){renderQuestion();}else{showResult();}},300);}
+function showResult(){
+  document.getElementById('progress').style.width='100%';
+  var total=0;
+  for(var i=0;i<answers.length;i++){total+=answers[i];}
+  var t=null;
+  for(var j=0;j<TIERS.length;j++){if(total>=TIERS[j].min&&total<=TIERS[j].max){t=TIERS[j];break;}}
+  document.getElementById('quiz').style.display='none';
+  var el=document.getElementById('result');
+  el.className='result show '+t.cssClass;
+  var bundleNote='';
+  if(t.tier==='Tier A'){
+    bundleNote='<div style="margin-top:14px;padding:14px 16px;background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.25);border-radius:10px;font-size:.85rem;color:var(--text);text-align:left"><strong style="color:var(--good)">Also: save 30% with the Complete Bundle</strong><br>All 4 packs (344 prompts) for $25 vs $36 bought separately.<br><a href="https://jiejuefuyou.gumroad.com/l/prompt-vault-complete?utm_source=site&utm_medium=b2b-quiz&utm_campaign=bundle-cta" target="_blank" rel="noopener" style="color:var(--good);font-size:.85rem">See bundle &rarr;</a></div>';
+  }
+  var nextHtml='';
+  for(var k=0;k<t.nextItems.length;k++){nextHtml+='<li>'+t.nextItems[k]+'</li>';}
+  el.innerHTML='<div class="result-tier">'+t.tier+'</div><div class="result-title">'+t.title+'</div><div class="result-score">'+t.scoreText+'</div><div class="result-desc">'+t.desc+'</div><div class="result-next"><h4>Next steps</h4><ul>'+nextHtml+'</ul></div><a href="'+t.ctaHref+'" class="result-cta" target="_blank" rel="noopener">'+t.cta+'</a><span class="result-alt">'+t.alt+'</span>'+bundleNote;
+  document.getElementById('share-box').style.display='block';
+  document.getElementById('breakdown').style.display='none';
+  document.getElementById('email-capture').style.display='block';
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function getResultText(){
+  var total=0;
+  for(var i=0;i<answers.length;i++){total+=answers[i];}
+  var t=null;
+  for(var j=0;j<TIERS.length;j++){if(total>=TIERS[j].min&&total<=TIERS[j].max){t=TIERS[j];break;}}
+  return 'AI Workflow Quiz Result: '+t.tier+' - '+t.title+' ('+t.scoreText+') | Take the quiz: jiejuefuyou.github.io/b2b-quiz.html';
+}
+function copyResult(){
+  navigator.clipboard.writeText(getResultText()).then(function(){alert('Copied to clipboard!');});
+}
+function submitEmail(){
+  var email=document.getElementById("quiz-email").value;
+  if(!email||!email.includes("@")){alert("Please enter a valid email");return;}
+  var resultText=getResultText();
+  var tierText=document.querySelector(".result-tier")?document.querySelector(".result-tier").textContent:"";
+  var mailto="mailto:jiejuefuyou@gmail.com?subject=AI+Roadmap+Request&body="+encodeURIComponent("Hi,\n\nI took the B2B quiz and got: "+tierText+"\n\nMy email: "+email+"\n\nCould you send me the free roadmap?\n\nQuiz result: "+resultText);
+  window.location.href=mailto;
+  document.getElementById("email-success").style.display="block";
+  document.getElementById("quiz-email").disabled=true;
+  document.querySelector(".email-capture button").disabled=true;
+}
+function shareX(){
+  window.open('https://x.com/intent/tweet?text='+encodeURIComponent(getResultText()),'_blank');
+}
+function shareLinkedIn(){
+  window.open('https://www.linkedin.com/sharing/share-offsite/?url='+encodeURIComponent('https://jiejuefuyou.github.io/b2b-quiz.html'),'_blank');
+}
+renderQuestion();
+</script>
+</body>
+</html>

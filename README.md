@@ -58,6 +58,13 @@ desktop-loop/
   SETUP.md                — Coordinate measurement + Task Scheduler registration walkthrough.
   config.json.template    — Per-user config (CC input box xy, idle threshold, fire interval).
 
+b2b-quiz/
+  b2b-quiz.html           — Self-contained 5-question B2B qualification quiz.
+                            3 tiers: early/mid/advanced. Routes 60%+ to "don't buy from me."
+                            Pure HTML + vanilla JS, ~14 KB, no backend, no analytics.
+                            MIT license.
+  QUIZ-SCHEMA.md          — Branching logic docs + how-to-fork guide for your own service biz.
+
 state.yml.template        — Single source of truth template. Copy + fill identity + apps.
 ```
 
