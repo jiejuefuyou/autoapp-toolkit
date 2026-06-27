@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "autoapp machine-readable behavioral spec (judge.py input)",
+  "type": "object",
+  "required": ["app", "coverage_floor", "required_suites", "iap", "screens", "locales", "accessibility_ids_required", "core_loop"],
+  "additionalProperties": true,
+  "properties": {
+    "app": { "type": "string", "description": "Xcode scheme / product name, e.g. AutoChoice" },
+    "coverage_floor": { "type": "number", "minimum": 0, "maximum": 1 },
+    "required_suites": {
+      "type": "array", "items": { "type": "string" },
+      "description": "XCTest targets that MUST run and pass (incl. the StateModel/Snapshot/StoreKit oracle suites)"
+    },
+    "iap": {
+      "type": "object",
+      "required": ["product_ids", "paywall_states"],
+      "properties": {
+        "product_ids": { "type": "array", "items": { "type": "string" }, "description": "must match .storekit + ASC + code literal" },
+        "paywall_states": { "type": "array", "items": { "type": "string" }, "description": "the 5 reachable outcomes" }
+      }
+    },
+    "core_loop": {
+      "type": "object",
+      "required": ["primary_action", "invariant", "reducer"],
+      "properties": {
+        "primary_action": { "type": "string" },
+        "invariant": { "type": "string", "description": "the one behavioral invariant the StateModel oracle enforces" },
+        "reducer": { "type": "string", "description": "the @Observable / view-model the SwiftQC StateModel mirrors" }
+      }
+    },
+    "locales": { "type": "array", "items": { "type": "string" } },
+    "screens": { "type": "array", "items": { "type": "string" }, "description": "each needs a recorded snapshot golden + a11y entry" },
+    "accessibility_ids_required": { "type": "array", "items": { "type": "string" } }
+  }
+}

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# autoapp LOCAL spec-driven gate — git pre-push hook.
+# Installed by autoapp-toolkit/scripts/install-hooks.sh. Blocks a push whose local judge
+# verdict fails (the on-Mac replacement for the cloud `gate` job). Bypass once: git push --no-verify
+set -uo pipefail
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+[ -f spec.json ] || exit 0      # not a spec-driven app repo — don't gate
+TK="$(cd "$ROOT/../autoapp-toolkit" 2>/dev/null && pwd || true)"
+[ -n "${TK:-}" ] && [ -f "$TK/scripts/verify.sh" ] || { echo "[pre-push] autoapp-toolkit/verify.sh not found — gate skipped"; exit 0; }
+APP="$(/usr/bin/python3 -c 'import json;print(json.load(open("spec.json"))["app"])' 2>/dev/null)"
+[ -n "$APP" ] || exit 0
+echo "[pre-push] local gate → verify.sh $APP --fast"
+if bash "$TK/scripts/verify.sh" "$APP" --fast; then
+  exit 0
+else
+  echo "❌ push BLOCKED — local judge verdict FAIL (see .verify/verdict.json)."
+  echo "   Fix it, or override once with: git push --no-verify"
+  exit 1
+fi
