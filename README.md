@@ -33,6 +33,8 @@ The pattern is simple: **make the agent re-entrant by externalizing memory**. Th
 
 ```
 scripts/
+  verify.sh              — Local Mac deterministic gate: lint → XCTest → Maestro → judge
+  ship.sh                — Local Mac release entry point: full gate → fastlane beta
   setup-asc-secrets.sh    — One command: populate 8 ASC secrets × N repos in the testflight environment
   verify_all.sh           — Cross-repo: 30+ ASC hard-requirement checks before submission
   asc_sales_report.sh     — Pull daily ASC sales TSV via API + parse into per-app units/proceeds
@@ -109,7 +111,7 @@ Edit each memory file to reflect **your** preferences. The defaults are calibrat
 
 In a Claude Code session, prompt:
 
-> Read MEMORY.md, state.yml, and the autoapp-toolkit README. Then scaffold my first app per state.yml. Bootstrap from a public iOS template, set up XcodeGen project.yml, fastlane Fastfile, GitHub Actions on macos-15. Commit + push. Stop only at hard gates.
+> Read MEMORY.md, state.yml, and the autoapp-toolkit README. Then scaffold my first app per state.yml. Bootstrap from a public iOS template, set up XcodeGen project.yml and fastlane, install the local Mac pre-push gate, and keep GitHub-hosted Actions disabled. Commit + push. Stop only at hard gates.
 
 The agent will commit, push, and add follow-up tasks to its own backlog. You don't ask "what now?" — `state.yml` and `decisions.md` tell the agent itself what's next.
 
@@ -144,6 +146,21 @@ Runs ~30 hard checks across all your repos:
 - Latest CI run is green
 
 Catches drift before fastlane deliver does. ~5 seconds per audit, vs. 12 minutes per failed CI run.
+
+Run the executable gates on the local Mac:
+
+```sh
+# Fast behavioral oracle (also used by the managed pre-push hook)
+bash toolkit/scripts/verify.sh AutoChoice --fast
+
+# Full unit/UI/StoreKit/Maestro gate before a release
+bash toolkit/scripts/verify.sh AutoChoice --full
+```
+
+The full gate resolves one exact simulator UDID, writes its own DerivedData,
+installs only the app product built by that invocation, bounds individual test
+execution, and emits `.verify/verdict.json`. The portfolio's GitHub Actions are
+disabled; workflow YAML files remain historical/reference material only.
 
 ### 6. Launch day
 
@@ -206,7 +223,11 @@ All four pass `verify_all.sh` and are awaiting their first signed TestFlight bui
 
 ## Lessons learned (2026-05 update)
 
-### `fastlane match` on macos-15 + GitHub Actions: use SSH deploy keys, not PATs
+### Historical: `fastlane match` on macos-15 + GitHub Actions
+
+The current portfolio runs CI and TestFlight preparation on the local Mac, with
+GitHub-hosted Actions disabled. The notes below are retained only for readers
+maintaining older installations.
 
 Fine-grained GitHub PATs fail unreliably on `macos-15` GitHub Actions runners
 when used as basic-auth in HTTPS git URLs for `fastlane match`. The exact
