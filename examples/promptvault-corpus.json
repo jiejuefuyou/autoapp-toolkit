@@ -18,20 +18,26 @@
       "repo": "promptvault-chrome",
       "path": "src/popup.js",
       "format": "js-const-array",
-      "marker": "const PROMPTS ="
+      "marker": "const PROMPTS =",
+      "writable": true,
+      "sync": { "indent": 2 }
     },
     {
       "id": "vscode",
       "repo": "promptvault-vscode",
       "path": "data/prompts.json",
-      "format": "json-array"
+      "format": "json-array",
+      "writable": true,
+      "sync": { "indent": 2 }
     },
     {
       "id": "wechat",
       "repo": "promptvault-wechat-miniprogram",
       "path": "utils/prompts.js",
       "format": "commonjs-array",
-      "marker": "module.exports ="
+      "marker": "module.exports =",
+      "writable": true,
+      "sync": { "indent": 2 }
     }
   ]
 }
