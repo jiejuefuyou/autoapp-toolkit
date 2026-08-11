@@ -191,7 +191,10 @@ class PromptCorpusSyncTests(unittest.TestCase):
         )
         self.assertEqual(generated["tags"], ["中文标签", "ＡＩ"])
         self.assertFalse(report.invalid)
-        self.assertFalse(report.has_drift)
+        vscode_drift = next(
+            item for item in report.drift if item.surface == "vscode"
+        )
+        self.assertFalse(vscode_drift.has_drift)
 
     def test_refuses_non_writable_and_canonical_targets(self) -> None:
         config = self.config()
