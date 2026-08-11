@@ -71,6 +71,20 @@ Supported packaged formats:
 
 JavaScript is parsed as text. The tools never import or evaluate a client bundle.
 
+## Comparison normalization is not generation
+
+The auditor uses Unicode NFKC, newline normalization, trailing-space cleanup, and tag whitespace folding only to answer the comparison question: “Are these records logically the same?” This deliberately prevents harmless representation differences from producing noisy drift reports.
+
+Those normalized values are **never** a generation source. NFKC can change user-visible content, for example:
+
+```text
+（专业语气） → (专业语气)
+要求：自然口语化 → 要求:自然口语化
+ＡＩ → AI
+```
+
+The synchronizer re-reads the raw canonical file after the canonical surface passes validation. It selects the configured fallback fields, removes only accidental leading/trailing field whitespace, deduplicates exact trimmed tags, and preserves internal whitespace, full-width punctuation, line breaks, and composed/decomposed Unicode exactly as written by the canonical author. The post-write auditor may normalize both sides for comparison, but no normalized comparison string is written to a product bundle.
+
 ## What fails
 
 ### Invalid surface
@@ -140,11 +154,13 @@ Safety properties:
 - canonical can never be selected as a target
 - non-opted-in target is rejected
 - invalid or duplicate canonical data blocks generation
+- canonical raw fields are re-read after validation; normalized audit records are never emitted
 - only canonical `title`, `body`, and `tags` are projected
+- full-width punctuation and Unicode composition remain canonical
 - JSON clients are regenerated as strict UTF-8 JSON
 - JavaScript clients replace only the configured JSON array; file prefix and suffix are preserved byte-for-byte
 - each target is written through an adjacent temporary file and atomic rename
-- post-write audit must show exact convergence for every selected target
+- post-write audit must show exact logical convergence for every selected target
 - a failed post-write audit returns non-zero and must not be committed
 - a second dry-run after a successful write must be idempotent (`changed=false`)
 
@@ -157,10 +173,11 @@ The synchronizer deliberately does not push, commit, open pull requests, or choo
 3. Resolve duplicate identities and variable-schema conflicts in canonical first.
 4. Run the synchronizer in dry-run mode and review target paths and hashes.
 5. Run with `--write`; require the built-in post-write MATCH result.
-6. Run each client’s local tests and packaging checks.
-7. Run the cross-repository audit with `--fail-on drift`.
-8. Commit generated bundles and the report summary together.
-9. Keep platform-specific descriptions, IDs, or translations in explicit sidecar fields rather than silently editing shared title/body content.
+6. Review a content diff and confirm punctuation/Unicode did not change except where canonical changed.
+7. Run each client’s local tests and packaging checks.
+8. Run the cross-repository audit with `--fail-on drift`.
+9. Commit generated bundles and the report summary together.
+10. Keep platform-specific descriptions, IDs, or translations in explicit sidecar fields rather than silently editing shared title/body content.
 
 ## CI use
 
