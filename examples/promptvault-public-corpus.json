@@ -1,0 +1,26 @@
+{
+  "canonical": "wechat",
+  "identity_fields": ["title"],
+  "surfaces": [
+    {
+      "id": "chrome",
+      "repo": "promptvault-chrome",
+      "path": "src/popup.js",
+      "format": "js-const-array",
+      "marker": "const PROMPTS ="
+    },
+    {
+      "id": "vscode",
+      "repo": "promptvault-vscode",
+      "path": "data/prompts.json",
+      "format": "json-array"
+    },
+    {
+      "id": "wechat",
+      "repo": "promptvault-wechat-miniprogram",
+      "path": "utils/prompts.js",
+      "format": "commonjs-array",
+      "marker": "module.exports ="
+    }
+  ]
+}
