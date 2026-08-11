@@ -2,9 +2,11 @@
 """Mechanically project one canonical prompt corpus into configured clients.
 
 Dry-run is the default. A target must opt in with ``"writable": true`` and the
-caller must pass ``--write`` before any file changes. After writing, the normal
-corpus audit runs again and the command fails unless every selected target is an
-exact match to canonical.
+caller must pass ``--write`` before any file changes. Comparison normalization
+belongs only to ``prompt_corpus_audit``; generated clients retain the canonical
+Unicode, punctuation, and line content. After writing, the normal corpus audit
+runs again and the command fails unless every selected target is an exact
+logical match to canonical.
 """
 
 from __future__ import annotations
@@ -57,15 +59,113 @@ def array_bounds(source: str, marker: str) -> tuple[int, int]:
     raise SyncError(f"unterminated array after marker: {marker!r}")
 
 
-def canonical_payload(records: Sequence[corpus.PromptRecord]) -> list[dict[str, Any]]:
-    return [
-        {
-            "title": record.title,
-            "body": record.body,
-            "tags": list(record.tags),
-        }
-        for record in records
-    ]
+def _project_text(value: Any, *, field: str, surface_id: str, index: int) -> str:
+    """Select canonical text without Unicode normalization or punctuation edits.
+
+    Leading/trailing whitespace is removed because every shipping client already
+    treats those edges as accidental. Internal whitespace, composed/decomposed
+    Unicode, full-width punctuation, and line breaks remain exactly canonical.
+    """
+
+    projected = "" if value is None else str(value).strip()
+    if not projected:
+        raise SyncError(
+            f"surface {surface_id}: canonical prompt {index + 1} has empty {field}"
+        )
+    return projected
+
+
+def _project_tags(
+    value: Any,
+    *,
+    surface_id: str,
+    index: int,
+) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SyncError(
+            f"surface {surface_id}: canonical prompt {index + 1} tags are not an array"
+        )
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in value:
+        tag = str(raw_tag).strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        result.append(tag)
+    return result
+
+
+def canonical_payload(
+    config: Mapping[str, Any],
+    workspace: Path,
+) -> list[dict[str, Any]]:
+    """Read raw canonical fields after audit validation.
+
+    Audit records are normalized comparison projections. Reusing them for output
+    would silently rewrite content (for example Chinese full-width punctuation
+    under NFKC). The synchronizer therefore re-reads the configured canonical
+    source and applies only field selection, edge trimming, and exact tag dedupe.
+    """
+
+    canonical_id = config.get("canonical")
+    surfaces = config.get("surfaces", [])
+    canonical_surface = next(
+        (
+            surface
+            for surface in surfaces
+            if isinstance(surface, Mapping) and surface.get("id") == canonical_id
+        ),
+        None,
+    )
+    if canonical_surface is None:
+        raise SyncError(f"canonical surface {canonical_id!r} is not configured")
+
+    repo = canonical_surface.get("repo")
+    relative_path = canonical_surface.get("path")
+    source_format = canonical_surface.get("format", "json-array")
+    if not isinstance(repo, str) or not repo:
+        raise SyncError(f"surface {canonical_id}: repo is required")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise SyncError(f"surface {canonical_id}: path is required")
+
+    path = (workspace / repo / relative_path).resolve()
+    raw_prompts = corpus.load_raw_prompts(
+        path,
+        source_format,
+        canonical_surface.get("marker"),
+    )
+    title_fields = corpus.candidate_fields(canonical_surface, "title")
+    body_fields = corpus.candidate_fields(canonical_surface, "body")
+    tag_fields = corpus.candidate_fields(canonical_surface, "tags")
+
+    payload: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_prompts):
+        if not isinstance(raw, Mapping):
+            raise SyncError(
+                f"surface {canonical_id}: canonical prompt {index + 1} is not an object"
+            )
+        title = _project_text(
+            corpus.first_field(raw, title_fields),
+            field="title",
+            surface_id=str(canonical_id),
+            index=index,
+        )
+        body = _project_text(
+            corpus.first_field(raw, body_fields),
+            field="body",
+            surface_id=str(canonical_id),
+            index=index,
+        )
+        tags = _project_tags(
+            corpus.first_field(raw, tag_fields, []),
+            surface_id=str(canonical_id),
+            index=index,
+        )
+        payload.append({"title": title, "body": body, "tags": tags})
+    return payload
 
 
 def serialize_payload(payload: Sequence[Mapping[str, Any]], indent: int) -> str:
@@ -92,13 +192,19 @@ def render_target(
     if source_format == "json-array":
         return rendered + "\n"
     if source_format in {"js-const-array", "commonjs-array"}:
-        default_marker = "const PROMPTS =" if source_format == "js-const-array" else "module.exports ="
+        default_marker = (
+            "const PROMPTS ="
+            if source_format == "js-const-array"
+            else "module.exports ="
+        )
         marker = target.get("marker", default_marker)
         if not isinstance(marker, str) or not marker:
             raise SyncError(f"surface {target.get('id')}: marker is required")
         start, end = array_bounds(current_source, marker)
         return current_source[:start] + rendered + current_source[end:]
-    raise SyncError(f"surface {target.get('id')}: unsupported writable format {source_format!r}")
+    raise SyncError(
+        f"surface {target.get('id')}: unsupported writable format {source_format!r}"
+    )
 
 
 def atomic_write(path: Path, content: str) -> None:
@@ -132,11 +238,17 @@ def selected_targets(
     canonical = config.get("canonical")
     surfaces = config.get("surfaces", [])
     targets: list[Mapping[str, Any]] = []
-    known_ids = {surface.get("id") for surface in surfaces if isinstance(surface, Mapping)}
+    known_ids = {
+        surface.get("id")
+        for surface in surfaces
+        if isinstance(surface, Mapping)
+    }
     if requested:
         unknown = requested - known_ids
         if unknown:
-            raise SyncError(f"unknown target surface(s): {', '.join(sorted(unknown))}")
+            raise SyncError(
+                f"unknown target surface(s): {', '.join(sorted(unknown))}"
+            )
         if canonical in requested:
             raise SyncError("canonical surface cannot be a sync target")
 
@@ -150,7 +262,9 @@ def selected_targets(
             continue
         if surface.get("writable") is not True:
             if requested and surface_id in requested:
-                raise SyncError(f"surface {surface_id!r} is not opted in with writable=true")
+                raise SyncError(
+                    f"surface {surface_id!r} is not opted in with writable=true"
+                )
             continue
         targets.append(surface)
     if not targets:
@@ -165,20 +279,31 @@ def sync(
     write: bool,
 ) -> tuple[list[dict[str, Any]], corpus.AuditReport | None]:
     before = corpus.audit(config, workspace)
-    canonical = next(item for item in before.surfaces if item.id == before.canonical)
+    canonical = next(
+        item for item in before.surfaces if item.id == before.canonical
+    )
     if (
         canonical.errors
         or canonical.duplicate_identities
         or canonical.exact_duplicates
         or canonical.variable_errors
     ):
-        raise SyncError("canonical surface is invalid; refusing to generate downstream bundles")
-    payload = canonical_payload(canonical.records)
+        raise SyncError(
+            "canonical surface is invalid; refusing to generate downstream bundles"
+        )
+
+    payload = canonical_payload(config, workspace)
+    if len(payload) != len(canonical.records):
+        raise SyncError(
+            "raw canonical payload count differs from validated audit records"
+        )
     targets = selected_targets(config, requested)
     plan: list[dict[str, Any]] = []
 
     for target in targets:
-        path = (workspace / str(target["repo"]) / str(target["path"])).resolve()
+        path = (
+            workspace / str(target["repo"]) / str(target["path"])
+        ).resolve()
         if not path.is_file():
             raise SyncError(f"target file not found: {path}")
         current = path.read_text(encoding="utf-8-sig")
@@ -200,8 +325,12 @@ def sync(
 
     after = corpus.audit(config, workspace)
     selected_ids = {item["surface"] for item in plan}
-    selected_drift = [item for item in after.drift if item.surface in selected_ids]
-    selected_surfaces = [item for item in after.surfaces if item.id in selected_ids]
+    selected_drift = [
+        item for item in after.drift if item.surface in selected_ids
+    ]
+    selected_surfaces = [
+        item for item in after.surfaces if item.id in selected_ids
+    ]
     invalid = any(
         item.errors
         or item.duplicate_identities
@@ -211,7 +340,8 @@ def sync(
     )
     if invalid or any(item.has_drift for item in selected_drift):
         raise SyncError(
-            "post-write corpus verification failed; inspect prompt_corpus_audit output before committing"
+            "post-write corpus verification failed; inspect "
+            "prompt_corpus_audit output before committing"
         )
     return plan, after
 
@@ -222,10 +352,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
     parser.add_argument(
         "--targets",
-        help="comma-separated surface ids; defaults to every writable non-canonical surface",
+        help=(
+            "comma-separated surface ids; defaults to every writable "
+            "non-canonical surface"
+        ),
     )
-    parser.add_argument("--write", action="store_true", help="perform atomic writes; default is dry-run")
-    parser.add_argument("--json", dest="json_output", type=Path, help="write sync plan/result JSON")
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="perform atomic writes; default is dry-run",
+    )
+    parser.add_argument(
+        "--json",
+        dest="json_output",
+        type=Path,
+        help="write sync plan/result JSON",
+    )
     return parser
 
 
@@ -233,7 +375,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     requested = None
     if arguments.targets:
-        requested = {item.strip() for item in arguments.targets.split(",") if item.strip()}
+        requested = {
+            item.strip()
+            for item in arguments.targets.split(",")
+            if item.strip()
+        }
     try:
         config = corpus.read_config(arguments.config)
         plan, report = sync(
@@ -242,7 +388,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             requested,
             arguments.write,
         )
-    except (corpus.AuditError, SyncError, OSError, UnicodeError, ValueError) as error:
+    except (
+        corpus.AuditError,
+        SyncError,
+        OSError,
+        UnicodeError,
+        ValueError,
+    ) as error:
         print(f"prompt-corpus-sync: {error}", file=sys.stderr)
         return 2
 
