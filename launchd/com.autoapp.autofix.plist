@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd LaunchAgent for the 24/7 unmanned autofix loop (NATIVE macOS scheduler).
+  Replaces the DEPRECATED pixel-clicking desktop-loop. Runs headless `claude -p` via
+  autofix-loop.sh on a fixed interval; survives Claude Code sessions being closed.
+
+  Enable:
+    cp autoapp-toolkit/launchd/com.autoapp.autofix.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.autoapp.autofix.plist
+  Disable:
+    launchctl unload -w ~/Library/LaunchAgents/com.autoapp.autofix.plist
+
+  Prereq: the `claude` CLI must be on PATH (autofix-loop.sh aborts with exit 3 otherwise).
+  To also push green commits (triggers TestFlight), add AUTOFIX_PUSH=1 to EnvironmentVariables.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.autoapp.autofix</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/sgh/Desktop/Work/repos/autoapp-toolkit/scripts/autofix-loop.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/sgh/Desktop/Work/repos</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AUTOFIX_MAX_ATTEMPTS</key>
+        <string>3</string>
+        <!-- Default: fix-to-green locally only. Set AUTOFIX_PUSH=1 to push (TestFlight). -->
+    </dict>
+
+    <!-- Fire every 30 min. launchd coalesces: no new instance while one is still running. -->
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <!-- Don't fire on load; first run on next interval. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/sgh/Desktop/Work/repos/autoapp-toolkit/logs/launchd.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sgh/Desktop/Work/repos/autoapp-toolkit/logs/launchd.stderr.log</string>
+
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>
