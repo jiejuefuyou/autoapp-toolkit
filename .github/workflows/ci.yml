@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoapp-toolkit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Prompt corpus auditor tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Syntax and unit tests
+        run: |
+          python -m py_compile scripts/prompt_corpus_audit.py
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          python scripts/prompt_corpus_audit.py --help >/dev/null
+
+  public-prompt-drift:
+    name: PromptVault public corpus report
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: workspace/autoapp-toolkit
+      - uses: actions/checkout@v4
+        with:
+          repository: jiejuefuyou/promptvault-chrome
+          path: workspace/promptvault-chrome
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: jiejuefuyou/promptvault-vscode
+          path: workspace/promptvault-vscode
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: jiejuefuyou/promptvault-wechat-miniprogram
+          path: workspace/promptvault-wechat-miniprogram
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Generate real cross-repository report
+        run: |
+          mkdir -p reports
+          python workspace/autoapp-toolkit/scripts/prompt_corpus_audit.py \
+            --config workspace/autoapp-toolkit/examples/promptvault-public-corpus.json \
+            --workspace workspace \
+            --fail-on never \
+            --json reports/prompt-corpus.json \
+            --text reports/prompt-corpus.txt
+          cat reports/prompt-corpus.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Classify report honestly
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('reports/prompt-corpus.json').read_text())
+          counts = ', '.join(f"{item['id']}={item['count']}" for item in report['surfaces'])
+          if report['invalid']:
+              print(f"::error::Prompt corpus contains invalid data ({counts}). See artifact.")
+          elif report['has_drift']:
+              print(f"::warning::Prompt corpus drift detected ({counts}). See artifact.")
+          else:
+              print(f"Prompt corpus matches ({counts}).")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: promptvault-public-corpus-report
+          path: reports/
+          if-no-files-found: error
