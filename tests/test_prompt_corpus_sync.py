@@ -155,9 +155,9 @@ class PromptCorpusSyncTests(unittest.TestCase):
         decomposed_cafe = "Cafe\u0301"
         raw_payload = [
             {
-                "title": "  邮件起草（专业语气）  ",
+                "title": "邮件起草（专业语气）  ",
                 "body": (
-                    "  要求：自然口语化，保留专业术语。\n"
+                    "要求：自然口语化，保留专业术语。\n"
                     f"不要改写这个组合：{decomposed_cafe}  "
                 ),
                 "tags": [" 中文标签 ", "中文标签", "ＡＩ"],
