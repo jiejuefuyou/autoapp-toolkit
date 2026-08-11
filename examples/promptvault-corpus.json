@@ -1,0 +1,43 @@
+{
+  "canonical": "ios",
+  "identity_fields": ["title"],
+  "surfaces": [
+    {
+      "id": "ios",
+      "repo": "autoapp-prompt-vault",
+      "path": "PromptVault/Resources/starter_prompts.json",
+      "format": "json-array",
+      "fields": {
+        "title": ["title_en", "title"],
+        "body": ["body_en", "body"],
+        "tags": ["tags_en", "tags"]
+      }
+    },
+    {
+      "id": "chrome",
+      "repo": "promptvault-chrome",
+      "path": "src/popup.js",
+      "format": "js-const-array",
+      "marker": "const PROMPTS =",
+      "writable": true,
+      "sync": { "indent": 2 }
+    },
+    {
+      "id": "vscode",
+      "repo": "promptvault-vscode",
+      "path": "data/prompts.json",
+      "format": "json-array",
+      "writable": true,
+      "sync": { "indent": 2 }
+    },
+    {
+      "id": "wechat",
+      "repo": "promptvault-wechat-miniprogram",
+      "path": "utils/prompts.js",
+      "format": "commonjs-array",
+      "marker": "module.exports =",
+      "writable": true,
+      "sync": { "indent": 2 }
+    }
+  ]
+}
