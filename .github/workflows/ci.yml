@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   unit:
-    name: Prompt corpus auditor tests
+    name: Prompt corpus audit and sync tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -24,12 +24,15 @@ jobs:
           python-version: "3.13"
       - name: Syntax and unit tests
         run: |
-          python -m py_compile scripts/prompt_corpus_audit.py
+          python -m py_compile \
+            scripts/prompt_corpus_audit.py \
+            scripts/prompt_corpus_sync.py
           python -m unittest discover -s tests -p 'test_*.py' -v
           python scripts/prompt_corpus_audit.py --help >/dev/null
+          python scripts/prompt_corpus_sync.py --help >/dev/null
 
   public-prompt-drift:
-    name: PromptVault public corpus report
+    name: PromptVault public corpus report and sync preview
     needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -55,7 +58,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Generate real cross-repository report
+      - name: Generate real cross-repository drift report
         run: |
           mkdir -p reports
           python workspace/autoapp-toolkit/scripts/prompt_corpus_audit.py \
@@ -79,8 +82,40 @@ jobs:
           else:
               print(f"Prompt corpus matches ({counts}).")
           PY
+      - name: Generate guarded Chrome and VS Code sync preview
+        run: |
+          python workspace/autoapp-toolkit/scripts/prompt_corpus_sync.py \
+            --config workspace/autoapp-toolkit/examples/promptvault-public-corpus.json \
+            --workspace workspace \
+            --targets chrome,vscode \
+            --write \
+            --json reports/sync-plan.json
+          python workspace/autoapp-toolkit/scripts/prompt_corpus_audit.py \
+            --config workspace/autoapp-toolkit/examples/promptvault-public-corpus.json \
+            --workspace workspace \
+            --fail-on drift \
+            --json reports/post-sync-corpus.json \
+            --text reports/post-sync-corpus.txt
+          {
+            echo
+            echo '## Mechanical sync preview'
+            cat reports/post-sync-corpus.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p \
+            generated/promptvault-chrome/src \
+            generated/promptvault-vscode/data
+          cp workspace/promptvault-chrome/src/popup.js \
+            generated/promptvault-chrome/src/popup.js
+          cp workspace/promptvault-vscode/data/prompts.json \
+            generated/promptvault-vscode/data/prompts.json
+          cp reports/sync-plan.json generated/sync-plan.json
       - uses: actions/upload-artifact@v4
         with:
           name: promptvault-public-corpus-report
           path: reports/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: promptvault-public-corpus-sync-preview
+          path: generated/
           if-no-files-found: error
