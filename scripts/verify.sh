@@ -16,6 +16,10 @@ export MAESTRO_CLI_NO_ANALYTICS=1
 
 APP="${1:?usage: verify.sh <AppName> [--fast|--full] [coverage_floor]}"
 MODE="${2:---fast}"
+case "$MODE" in
+  --fast|--full) ;;
+  *) echo "unsupported mode: $MODE (expected --fast or --full)"; exit 2 ;;
+esac
 # --fast runs only the behavioral-oracle suite, so whole-app coverage isn't meaningful
 # (the coverage gate belongs to --full, which runs the entire test target). Default
 # accordingly; an explicit floor arg still overrides.
@@ -31,8 +35,12 @@ ORACLE="${REDUCER}ModelTests"
 
 # 1) single-source lints (carried in each app's scripts/)
 say "1. lint"
-[ -f scripts/lint_modal_env.py ] && python3 scripts/lint_modal_env.py "$APP" || true
-[ -f scripts/lint_paywall_loadstate.py ] && python3 scripts/lint_paywall_loadstate.py "$APP" --selftest || true
+if [ -f scripts/lint_modal_env.py ]; then
+  python3 scripts/lint_modal_env.py "$APP" || exit $?
+fi
+if [ -f scripts/lint_paywall_loadstate.py ]; then
+  python3 scripts/lint_paywall_loadstate.py "$APP" --selftest || exit $?
+fi
 
 # 2) build + test -> .xcresult  (fast = oracle suite only, avoids the slow/flaky StoreKit units)
 say "2. build + test ($MODE)"
@@ -60,7 +68,26 @@ fi
 say "4. judge"
 SK="$(find . -name '*.storekit' -not -path './.verify/*' 2>/dev/null | head -1)"
 NOCOV=""; [ "$MODE" = "--fast" ] && NOCOV="--no-coverage"   # single-suite coverage isn't meaningful
-python3 "$TK/scripts/judge.py" --spec spec.json --xcresult "$RB" \
+JUDGE_SPEC="$REPO/spec.json"
+if [ "$MODE" = "--fast" ]; then
+  JUDGE_SPEC="$V/fast-spec.json"
+  if ! python3 - "$REPO/spec.json" "$JUDGE_SPEC" "$ORACLE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+source, target, oracle = map(Path, sys.argv[1:])
+spec = json.loads(source.read_text(encoding="utf-8"))
+spec["required_suites"] = [str(oracle)]
+spec["coverage_floor"] = 0
+target.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+PY
+  then
+    echo "failed to derive the fast-mode judge spec" >&2
+    exit 2
+  fi
+fi
+python3 "$TK/scripts/judge.py" --spec "$JUDGE_SPEC" --xcresult "$RB" \
   ${SK:+--storekit "$SK"} --coverage-floor "$FLOOR" $NOCOV ${MA[@]+"${MA[@]}"} --out "$V/verdict.json"
 EC=$?
 echo; cat "$V/verdict.json" 2>/dev/null; echo
