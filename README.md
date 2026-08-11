@@ -48,7 +48,7 @@ memory-templates/
   token-economy.md        — Active / Conservative / Recovery operating modes + rolling-window protocol.
   MEMORY.md.template      — The index that lives at ~/.claude/projects/<id>/memory/MEMORY.md
 
-desktop-loop/
+desktop-loop/               — DEPRECATED; historical UI-click driver, do not enable
   autoapp_loop.py         — PyAutoGUI-based "body" for the agent. Solves Claude Code's hard limit:
                             CronCreate jobs are session-only and die when VSCode pauses. This script
                             runs via Windows Task Scheduler, simulates click+paste+Enter into the CC

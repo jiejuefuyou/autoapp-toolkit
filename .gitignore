@@ -22,3 +22,6 @@ venv/
 
 # Node
 node_modules/
+
+# Local runtime output and ASC mutation backups
+logs/
