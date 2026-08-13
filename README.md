@@ -39,6 +39,7 @@ scripts/
   verify_all.sh           — Cross-repo: 30+ ASC hard-requirement checks before submission
   asc_sales_report.sh     — Pull daily ASC sales TSV via API + parse into per-app units/proceeds
   asc_reviews_check.sh    — Incremental: snapshot + diff to see only NEW reviews
+  asc-monitor.sh          — Mac-native live ASC versions/TestFlight/IAP/review probe
   dday_runbook.sh         — Launch-day: input slug + Store URL → output platform-specific posts (Reddit/HN/PH/小红书/即刻/Twitter) timed by timezone
   lint-metadata.sh        — Per-repo: validate ASC field-length limits before fastlane deliver
   init-new-app.sh         — Bootstrap a new app repo from one of your existing apps as a template (rename, sed, init git)
@@ -161,6 +162,24 @@ The full gate resolves one exact simulator UDID, writes its own DerivedData,
 installs only the app product built by that invocation, bounds individual test
 execution, and emits `.verify/verdict.json`. The portfolio's GitHub Actions are
 disabled; workflow YAML files remain historical/reference material only.
+
+Before any Mac-side release decision, refresh the live App Store Connect state:
+
+```sh
+mkdir -p ~/.appstoreconnect/private_keys
+# Store AuthKey_<KEY_ID>.p8 there and put key_id + issuer_id in
+# ~/.appstoreconnect/config.json (never commit either file).
+bash toolkit/scripts/asc-monitor.sh \
+  --bundle com.example.app \
+  --snapshot toolkit/logs/asc_realtime_state.json
+```
+
+The monitor is read-only and uses Python's standard library plus macOS
+`/usr/bin/openssl`; a project virtualenv and PyJWT are not required. It reports
+App Store versions and selected builds, TestFlight trains, IAP versions/locales,
+live base price and availability, review screenshot identity, and review
+submissions as independent states. A zero exit without a written snapshot is
+not a successful refresh.
 
 ### 6. Launch day
 
