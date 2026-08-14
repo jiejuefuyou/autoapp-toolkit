@@ -146,16 +146,46 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-`testflight.yml` triggers, builds, signs, uploads. ~12 min later it's on TestFlight.
+`testflight.yml` triggers, builds, signs, and uploads. Do not call that
+“available in TestFlight” until the exact build/group/tester gate passes.
 
-## Step 7 — TestFlight install + accept
+## Step 7 — Validate on a physical iPhone
 
-Open TestFlight on your iPhone. Install your app. Run the flows. If broken: tell the agent what's broken; it fixes; tag v0.1.1; cycle repeats.
+Default to Xcode direct install for product validation, then remove the UI-test
+runner that Xcode leaves behind:
+
+```sh
+# Run the app repository's Xcode direct-install lane first.
+python3 ../../toolkit/scripts/device_app_hygiene.py \
+  --device "$PHYSICAL_TEST_DEVICE" \
+  --bundle com.yourname.myfirstapp \
+  --version 0.1.0 \
+  --build 1 \
+  --distribution direct \
+  --clean-test-runners \
+  --receipt .verify/device-app-hygiene.json
+```
+
+If TestFlight distribution itself must be tested, first run:
+
+```sh
+python3 ../../toolkit/scripts/asc_testflight_readiness.py \
+  --bundle com.yourname.myfirstapp \
+  --train 0.1.0 \
+  --build 1 \
+  --group "Internal Testers" \
+  --tester your-asc-user@example.com \
+  --receipt .verify/asc-testflight-server.json
+```
+
+Only after the server gate passes should the tester accept/install on the
+target device. One unexplained install failure stops mutation; inspect the
+device TestFlight account/session instead of recreating groups or reinviting.
 
 If working: prompt the agent:
 
 ```
-TestFlight build accepts. Submit the App Store version for review.
+Physical receipt and live ASC gates pass. Submit the App Store version for review.
 ```
 
 The agent runs:

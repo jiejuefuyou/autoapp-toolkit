@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   unit:
-    name: Prompt corpus audit and sync tests
+    name: Toolkit syntax and unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,9 +25,14 @@ jobs:
       - name: Syntax and unit tests
         run: |
           python -m py_compile \
+            scripts/asc_monitor.py \
+            scripts/asc_testflight_readiness.py \
+            scripts/device_app_hygiene.py \
             scripts/prompt_corpus_audit.py \
             scripts/prompt_corpus_sync.py
           python -m unittest discover -s tests -p 'test_*.py' -v
+          python scripts/asc_testflight_readiness.py --help >/dev/null
+          python scripts/device_app_hygiene.py --help >/dev/null
           python scripts/prompt_corpus_audit.py --help >/dev/null
           python scripts/prompt_corpus_sync.py --help >/dev/null
 

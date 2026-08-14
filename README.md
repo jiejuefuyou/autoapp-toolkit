@@ -40,6 +40,8 @@ scripts/
   asc_sales_report.sh     — Pull daily ASC sales TSV via API + parse into per-app units/proceeds
   asc_reviews_check.sh    — Incremental: snapshot + diff to see only NEW reviews
   asc-monitor.sh          — Mac-native live ASC versions/TestFlight/IAP/review probe
+  asc_testflight_readiness.py — Read-only exact app/build/group/tester/ASC-user gate
+  device_app_hygiene.py   — Physical iPhone exact-app/icon audit + XCTest runner cleanup
   dday_runbook.sh         — Launch-day: input slug + Store URL → output platform-specific posts (Reddit/HN/PH/小红书/即刻/Twitter) timed by timezone
   lint-metadata.sh        — Per-repo: validate ASC field-length limits before fastlane deliver
   init-new-app.sh         — Bootstrap a new app repo from one of your existing apps as a template (rename, sed, init git)
@@ -130,7 +132,10 @@ export FASTLANE_USER=your-apple-id@example.com
 bash toolkit/scripts/setup-asc-secrets.sh
 ```
 
-This populates 8 secrets in each repo's `testflight` environment. After it completes, trigger `init_signing.yml` once per repo, then tag `v0.1.0` and you're on TestFlight in ~12 minutes.
+This populates 8 secrets in each repo's `testflight` environment. After it
+completes, trigger `init_signing.yml` once per repo. A later tag can upload a
+build, but upload success is not proof that a tester, group, or device can
+install it.
 
 ### 5. Pre-submission audit
 
@@ -180,6 +185,40 @@ App Store versions and selected builds, TestFlight trains, IAP versions/locales,
 live base price and availability, review screenshot identity, and review
 submissions as independent states. A zero exit without a written snapshot is
 not a successful refresh.
+
+Before an internal TestFlight attempt, prove the complete server-side chain:
+
+```sh
+python3 toolkit/scripts/asc_testflight_readiness.py \
+  --bundle com.example.app \
+  --train 1.0.0 \
+  --build 1 \
+  --group "Internal Testers" \
+  --tester tester@example.com \
+  --receipt .verify/asc-testflight-server.json
+```
+
+This is deliberately a server-only receipt. It verifies that the tester is a
+real eligible App Store Connect user, not merely an email-only `betaTester`,
+and that the exact group grants the exact build. It cannot prove the target
+iPhone's Apple Account session or installation.
+
+For normal physical validation, use Xcode direct install and finish every UI
+test by removing the generated runner shell and checking the real app icon:
+
+```sh
+python3 toolkit/scripts/device_app_hygiene.py \
+  --device "$PHYSICAL_TEST_DEVICE" \
+  --bundle com.example.app \
+  --version 1.0.0 \
+  --build 1 \
+  --distribution direct \
+  --clean-test-runners \
+  --receipt .verify/device-app-hygiene.json
+```
+
+See [the TestFlight and physical-device runbook](docs/testflight-device-distribution-runbook.md)
+before changing any tester, group, account, or device workflow.
 
 ### 6. Launch day
 
@@ -232,7 +271,9 @@ Built and operated with this toolkit:
 - [DaysUntil](https://github.com/jiejuefuyou/autoapp-days-until) — quiet countdown
 - [PromptVault](https://github.com/jiejuefuyou/autoapp-prompt-vault) — offline AI prompt manager
 
-All four pass `verify_all.sh` and are awaiting their first signed TestFlight build.
+The repositories are references, not a shared release-status claim. Read live
+ASC and device receipts before reporting any app as uploaded, installable,
+installed, submitted, or released.
 
 ---
 
@@ -295,21 +336,22 @@ Full debugging journey + 4 bonus issues (cert ceiling, missing actions,
 profile name with timestamp suffix, iPad orientation requirement) at
 [autoapp/reports/devto-article-14-asc-ssh-deploy-key-paste-ready.md](https://github.com/jiejuefuyou/autoapp/blob/main/reports/devto-article-14-asc-ssh-deploy-key-paste-ready.md).
 
-### Use `gh api` to do everything Apple's docs say "go to ASC web UI"
+### Use APIs, but prove the boundaries they cannot see
 
-Almost all "click in ASC dashboard" steps have a GitHub or ASC API equivalent.
-We've automated:
+Many ASC and GitHub steps have an API equivalent. We automate:
 - Adding deploy keys to private repos (`gh api`)
 - Creating internal beta groups (`v1/betaGroups` POST)
-- Adding internal testers + linking builds (`v1/betaTesters` + `relationships/individualTesters`)
+- Linking builds and eligible testers to beta groups
 - Setting Test Information (`v1/betaAppLocalizations`)
 - Setting content rights declaration (`PATCH apps/{id}`)
 
-Reusable script: [autoapp/orchestrator/setup_asc_internal_tester.py](https://github.com/jiejuefuyou/autoapp/blob/main/orchestrator/setup_asc_internal_tester.py) — one command wires the entire TestFlight chain for any new app.
-
-The principle: **if Apple's docs say "click here in ASC", check the ASC API
-first**. 90% of the time there's an endpoint, and 10% of the time there isn't
-but `gh api` handles the GitHub side regardless.
+The previous claim that one API command could wire the entire internal
+TestFlight chain was wrong. An internal tester must also be an accepted App
+Store Connect user with an eligible role and app access. The API also does not
+prove the target device's invitation-account binding, exact installation, or
+Business agreement screen. Run `asc_testflight_readiness.py`, then collect a
+separate device receipt. Paid Apps Agreement, tax, banking, and revised legal
+terms remain live Account Holder checks.
 
 
 ## License

@@ -7,7 +7,7 @@ last_updated: YYYY-MM-DD
 phase: 0
 phase_description: |
   Phase 0 = scaffolds in place, awaiting Apple Developer enrollment + ASC API key.
-  Phase 1 = first app on TestFlight.
+  Phase 1 = first app has separate upload, TestFlight-server, and device-install receipts.
   Phase 2 = first app on App Store.
   Phase 3+ = adding more apps based on revenue data.
 
@@ -56,7 +56,16 @@ hard_gates:
       ASC > Users and Access > Keys > + > App Manager role > download .p8
 
   - id: testflight_user_acceptance
-    description: human installs via TestFlight, validates app actually works
+    description: exact ASC user accepts on target device after server gate passes
+    state: not_yet_due
+
+  - id: asc_business_agreements
+    description: Paid Apps Agreement plus required tax and banking are live-verified
+    state: not_started
+    user_action_required: Account Holder inspects ASC Business and accepts any legal terms
+
+  - id: physical_device_hygiene
+    description: exactly one canonical app remains; XCTest runner removed; real icon fetched
     state: not_yet_due
 
   - id: app_store_submit

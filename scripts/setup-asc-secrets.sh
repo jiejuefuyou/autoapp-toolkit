@@ -92,7 +92,8 @@ for r in "${REPOS[@]}"; do
   echo "     gh workflow run init_signing.yml -R $OWNER/$r -f type=appstore"
 done
 echo "  2. 等约 10 分钟，确认 autoapp-certs 仓里出现加密的 cert + profile。"
-echo "  3. 推 v0.1.0 tag 到 autoapp-hello 触发 TestFlight build："
+echo "  3. 推 v0.1.0 tag 到 autoapp-hello 触发 ASC build upload（不等于已可安装）："
 echo "     cd repos/autoapp-hello && git tag v0.1.0 && git push origin v0.1.0"
+echo "  4. 安装前运行 asc_testflight_readiness.py，逐项验证 build/group/tester/ASC user。"
 echo ""
 echo "ITC_TEAM_ID 如未填：第一次 init_signing 跑完后查 fastlane log，回头 export 后重跑此脚本。"

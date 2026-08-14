@@ -19,4 +19,5 @@ command -v fastlane >/dev/null || { echo "fastlane missing (brew install fastlan
 # These are the SAME secrets the cloud testflight.yml consumed — here they live in your env/keychain.
 : "${ASC_KEY_ID:?set ASC_KEY_ID}"; : "${MATCH_PASSWORD:?set MATCH_PASSWORD}"
 bundle exec fastlane beta
-echo "== shipped (TestFlight) =="
+echo "== upload completed; TestFlight tester/group/device install still unproven =="
+echo "Run asc_testflight_readiness.py before any TestFlight install attempt."
