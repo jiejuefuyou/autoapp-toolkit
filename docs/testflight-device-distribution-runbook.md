@@ -28,6 +28,29 @@ The cleanup selector is deliberately narrow: it can remove only a
 developer-signed XCTest runner whose bundle identifier begins with the exact
 canonical product bundle identifier. It never removes another product.
 
+For a local App Store archive and TestFlight upload, use the shared exact-build
+gate. Omit `--upload` first to prove the archive, IPA identity, signing profile,
+source SHA, and remote readback without changing App Store Connect:
+
+```bash
+python3 autoapp-toolkit/scripts/local_testflight_release.py \
+  --repo autoapp/repos/example \
+  --project Example.xcodeproj \
+  --scheme Example \
+  --app-name Example \
+  --bundle com.example.app \
+  --version 1.0.0 \
+  --build 1 \
+  --git-sha "$(git -C autoapp/repos/example rev-parse HEAD)"
+```
+
+Only add `--upload` after the artifact receipt has been inspected. The tool
+refuses dirty, divergent, non-`main`, or remote-unreadable source; verifies the
+IPA bundle/version/build, code signature, encryption declaration, and App Store
+profile; then waits for the exact ASC train/build to become valid with a real
+icon. It does not distribute the build to testers, claim a physical install,
+or submit anything to App Review.
+
 ## Before any internal TestFlight attempt
 
 Run the read-only server gate:
