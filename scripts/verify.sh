@@ -115,6 +115,18 @@ print(matches[0])
   [ -n "$SIM_UDID" ] || { echo "failed to resolve simulator: $SIM ($SIM_RUNTIME)"; exit 2; }
 fi
 DEST="platform=iOS Simulator,id=$SIM_UDID"
+replace_ephemeral_simulator() {
+  local phase="${1:?simulator phase is required}"
+  cleanup_ephemeral_simulator
+  EPHEMERAL_SIM_NAME="${APP//[^[:alnum:]]/-}-full-${phase}-$$"
+  SIM_UDID="$(xcrun simctl create "$EPHEMERAL_SIM_NAME" "$SIM_DEVICE_TYPE" "$SIM_RUNTIME_ID")" || return $?
+  [ -n "$SIM_UDID" ] || { echo "failed to create isolated simulator: $SIM ($SIM_RUNTIME)"; return 2; }
+  EPHEMERAL_SIM_UDID="$SIM_UDID"
+  SIM="$EPHEMERAL_SIM_NAME"
+  DEST="platform=iOS Simulator,id=$SIM_UDID"
+  xcrun simctl boot "$SIM_UDID" >/dev/null 2>&1 || true
+  xcrun simctl bootstatus "$SIM_UDID" -b >/dev/null
+}
 XCTEST_TIMEOUT_ARGS=()
 if [ "$MODE" = "--full" ]; then
   # A single Apple-framework regression must produce a bounded red receipt,
@@ -152,15 +164,75 @@ xcrun simctl bootstatus "$SIM_UDID" -b >/dev/null || exit $?
 RB="$V/result.xcresult"
 ONLY=(-only-testing:"${APP}Tests/${ORACLE}")
 [ "$MODE" = "--full" ] && ONLY=()
-xcodebuild test -scheme "$APP" ${ONLY[@]+"${ONLY[@]}"} -destination "$DEST" \
-  ${XCTEST_TIMEOUT_ARGS[@]+"${XCTEST_TIMEOUT_ARGS[@]}"} \
-  -derivedDataPath "$DD" \
-  -resultBundlePath "$RB" -enableCodeCoverage YES CODE_SIGNING_ALLOWED=NO \
-  >"$V/build.log" 2>&1 || say "xcodebuild test returned non-zero (judge inspects the .xcresult)"
+run_xcodebuild_test() {
+  local result_bundle="$1"
+  local log_path="$2"
+  shift 2
+  xcodebuild test -scheme "$APP" "$@" -destination "$DEST" \
+    ${XCTEST_TIMEOUT_ARGS[@]+"${XCTEST_TIMEOUT_ARGS[@]}"} \
+    -derivedDataPath "$DD" \
+    -resultBundlePath "$result_bundle" -enableCodeCoverage YES CODE_SIGNING_ALLOWED=NO \
+    >"$log_path" 2>&1
+}
+
+XCODEBUILD_PASSED=0
+if [ "$MODE" = "--full" ] && [ -n "$EPHEMERAL_SIM_UDID" ]; then
+  UNIT_RB="$V/unit.xcresult"
+  UI_RB="$V/ui.xcresult"
+  UNIT_PASSED=0
+  UI_PASSED=0
+
+  if run_xcodebuild_test "$UNIT_RB" "$V/build.unit.log" -only-testing:"${APP}Tests"; then
+    UNIT_PASSED=1
+    replace_ephemeral_simulator ui || exit $?
+    if run_xcodebuild_test "$UI_RB" "$V/build.ui.log" -only-testing:"${APP}UITests"; then
+      UI_PASSED=1
+    elif /usr/bin/grep -Eq \
+        'kAXErrorAPIDisabled|Timed out waiting for AX loaded notification|Failed to initialize for UI testing' \
+        "$V/build.ui.log" && ! /usr/bin/grep -Eq "Test Case '.*' failed" "$V/build.ui.log"
+    then
+      # A simulator whose first AX session failed stays poisoned even after its
+      # boot reports ready. Preserve both receipts, discard that device, and
+      # retry once on a new isolated simulator. Product assertions never retry.
+      mv "$V/build.ui.log" "$V/build.ui.attempt1.ax-initialization.log"
+      mv "$UI_RB" "$V/ui.attempt1.ax-initialization.xcresult"
+      say "simulator AX initialization failed — retrying UI tests on a new isolated device"
+      replace_ephemeral_simulator ui-retry || exit $?
+      if run_xcodebuild_test "$UI_RB" "$V/build.ui.log" -only-testing:"${APP}UITests"; then
+        UI_PASSED=1
+      fi
+    fi
+  fi
+
+  {
+    printf '%s\n' '===== unit tests ====='
+    cat "$V/build.unit.log"
+    if [ -f "$V/build.ui.attempt1.ax-initialization.log" ]; then
+      printf '%s\n' '===== UI tests attempt 1: AX initialization failure ====='
+      cat "$V/build.ui.attempt1.ax-initialization.log"
+    fi
+    if [ -f "$V/build.ui.log" ]; then
+      printf '%s\n' '===== UI tests ====='
+      cat "$V/build.ui.log"
+    fi
+  } >"$V/build.log"
+
+  if [ -d "$UNIT_RB" ] && [ -d "$UI_RB" ]; then
+    xcrun xcresulttool merge --output-path "$RB" "$UNIT_RB" "$UI_RB" >/dev/null || exit $?
+  elif [ -d "$UNIT_RB" ]; then
+    cp -R "$UNIT_RB" "$RB"
+  fi
+  if [ "$UNIT_PASSED" -eq 1 ] && [ "$UI_PASSED" -eq 1 ]; then
+    XCODEBUILD_PASSED=1
+  fi
+elif run_xcodebuild_test "$RB" "$V/build.log" ${ONLY[@]+"${ONLY[@]}"}; then
+  XCODEBUILD_PASSED=1
+fi
+[ "$XCODEBUILD_PASSED" -eq 1 ] || say "xcodebuild test returned non-zero (judge inspects the .xcresult)"
 
 # 3) e2e_sim (full only) — local Maestro, no runner
 MA=()
-if [ "$MODE" = "--full" ] && [ -d maestro ]; then
+if [ "$MODE" = "--full" ] && [ "$XCODEBUILD_PASSED" -eq 1 ] && [ -d maestro ]; then
   say "3. maestro e2e"
   # Install the product built by THIS invocation. Searching global DerivedData
   # made the old gate nondeterministic: `find | head -1` could install a stale
@@ -174,7 +246,8 @@ if [ "$MODE" = "--full" ] && [ -d maestro ]; then
   fi
   xcrun simctl install "$SIM_UDID" "$APPBIN" >/dev/null 2>&1 || exit $?
   mkdir -p "$V/maestro"
-  if maestro test maestro/ --udid "$SIM_UDID" \
+  if MAESTRO_DRIVER_STARTUP_TIMEOUT="${MAESTRO_DRIVER_STARTUP_TIMEOUT:-180000}" \
+    maestro test maestro/ --udid "$SIM_UDID" \
       --format junit --output "$V/maestro/report.xml" \
       --debug-output "$V/maestro/debug" --flatten-debug-output \
       >"$V/maestro.log" 2>&1

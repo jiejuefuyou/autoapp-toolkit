@@ -167,9 +167,14 @@ The full gate resolves one exact simulator UDID, writes its own DerivedData,
 creates and removes an isolated iOS 18.4 simulator by default, installs only the
 app product built by that invocation, bounds individual test execution, and
 enforces the product's committed `spec.json` coverage floor before emitting
-`.verify/verdict.json`. Set `IOS_FULL_REUSE_SIMULATOR=1` only for an intentional
-diagnostic run against an existing simulator. The portfolio's GitHub Actions
-are disabled; workflow YAML files remain historical/reference material only.
+`.verify/verdict.json`. Unit tests run on one isolated device; UI tests and
+Maestro run on a second device, with the two XCTest receipts merged by Xcode.
+Set `IOS_FULL_REUSE_SIMULATOR=1` only for an intentional diagnostic run against
+an existing simulator. A first-boot AX initialization failure is preserved and
+retried once on a new isolated device; product test failures are never retried.
+Maestro's iOS driver gets a bounded 180-second cold start window. The portfolio's
+GitHub Actions are disabled; workflow YAML files remain historical/reference
+material only.
 
 Before any Mac-side release decision, refresh the live App Store Connect state:
 
