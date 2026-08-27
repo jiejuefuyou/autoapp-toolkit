@@ -51,6 +51,25 @@ profile; then waits for the exact ASC train/build to become valid with a real
 icon. It does not distribute the build to testers, claim a physical install,
 or submit anything to App Review.
 
+After the exact TestFlight receipt exists, stage (but do not submit) the App
+Store version with the separate idempotent gate:
+
+```bash
+python3 autoapp-toolkit/scripts/asc_app_store_stage.py \
+  --bundle com.example.app \
+  --version 1.0.0 \
+  --build 1 \
+  --build-id ASC-BUILD-RESOURCE-ID \
+  --release-receipt example/.verify/release/exact-build.json \
+  --receipt example/.verify/release/app-store-stage.json
+```
+
+The default invocation is a read-only preview. Add `--apply` only after checking
+the exact bundle/version/build/build-id tuple. Apply mode creates a manual-release
+draft if needed, selects only that build, copies metadata from the newest live
+version, writes localized release notes, and reads back metadata and screenshot
+completeness. It never creates or submits an App Review submission.
+
 ## Before any internal TestFlight attempt
 
 Run the read-only server gate:
