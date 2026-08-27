@@ -164,9 +164,12 @@ bash toolkit/scripts/verify.sh AutoChoice --full
 ```
 
 The full gate resolves one exact simulator UDID, writes its own DerivedData,
-installs only the app product built by that invocation, bounds individual test
-execution, and emits `.verify/verdict.json`. The portfolio's GitHub Actions are
-disabled; workflow YAML files remain historical/reference material only.
+creates and removes an isolated iOS 18.4 simulator by default, installs only the
+app product built by that invocation, bounds individual test execution, and
+enforces the product's committed `spec.json` coverage floor before emitting
+`.verify/verdict.json`. Set `IOS_FULL_REUSE_SIMULATOR=1` only for an intentional
+diagnostic run against an existing simulator. The portfolio's GitHub Actions
+are disabled; workflow YAML files remain historical/reference material only.
 
 Before any Mac-side release decision, refresh the live App Store Connect state:
 

@@ -21,16 +21,19 @@ case "$MODE" in
   *) echo "unsupported mode: $MODE (expected --fast or --full)"; exit 2 ;;
 esac
 # --fast runs only the behavioral-oracle suite, so whole-app coverage isn't meaningful
-# (the coverage gate belongs to --full, which runs the entire test target). Default
-# accordingly; an explicit floor arg still overrides.
-if [ "$MODE" = "--full" ]; then FLOOR="${3:-0.55}"; else FLOOR="${3:-0}"; fi
+# (the coverage gate belongs to --full, which runs the entire test target). A full
+# run defaults to the product's committed spec floor; an explicit third argument
+# remains available for deliberate diagnostics.
+if [ "$MODE" = "--full" ]; then FLOOR="${3:-}"; else FLOOR="${3:-0}"; fi
 TK="$(cd "$(dirname "$0")/.." && pwd)"     # toolkit root (judge.py lives here)
 REPO="$(pwd)"                               # MUST be invoked from the app repo root
 # Keep the fast gate on the newest installed portfolio simulator, while the full
 # StoreKit transaction oracle runs on the known-good iOS 18.4 runtime. Xcode
 # 26.6 + iOS 26.5 can load the StoreKit catalogue but never deliver the
-# Ask-to-Buy response, leaving xcodebuild hung indefinitely. Both destinations
-# remain explicit and overrideable for future runtime qualification.
+# Ask-to-Buy response, leaving xcodebuild hung indefinitely. Full runs create a
+# fresh simulator by default: reusing one device across the portfolio eventually
+# leaves XCUIAutomation returning kAXErrorAPIDisabled for every app. Set
+# IOS_FULL_REUSE_SIMULATOR=1 only for an intentional diagnostic run.
 if [ "$MODE" = "--full" ]; then
   SIM="${IOS_FULL_SIMULATOR:-iPhone 16 Pro}"
   SIM_RUNTIME="${IOS_FULL_RUNTIME:-18.4}"
@@ -38,7 +41,56 @@ else
   SIM="${IOS_QUICK_SIMULATOR:-iPhone 17 Pro}"
   SIM_RUNTIME="${IOS_QUICK_RUNTIME:-}"
 fi
-SIM_UDID="$(xcrun simctl list devices available -j | python3 -c '
+EPHEMERAL_SIM_UDID=""
+cleanup_ephemeral_simulator() {
+  if [ -n "$EPHEMERAL_SIM_UDID" ]; then
+    xcrun simctl shutdown "$EPHEMERAL_SIM_UDID" >/dev/null 2>&1 || true
+    xcrun simctl delete "$EPHEMERAL_SIM_UDID" >/dev/null 2>&1 || true
+    EPHEMERAL_SIM_UDID=""
+  fi
+}
+trap cleanup_ephemeral_simulator EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ "$MODE" = "--full" ] && [ "${IOS_FULL_REUSE_SIMULATOR:-0}" != "1" ]; then
+  SIM_DEVICE_TYPE="$(xcrun simctl list devicetypes -j | python3 -c '
+import json
+import sys
+
+name = sys.argv[1]
+matches = [
+    item["identifier"] for item in json.load(sys.stdin).get("devicetypes", [])
+    if item.get("name") == name and item.get("identifier")
+]
+if len(matches) != 1:
+    print(f"expected exactly one simulator device type name={name!r}; found {len(matches)}", file=sys.stderr)
+    raise SystemExit(2)
+print(matches[0])
+' "$SIM")" || exit $?
+  SIM_RUNTIME_ID="$(xcrun simctl list runtimes -j | python3 -c '
+import json
+import sys
+
+version = sys.argv[1]
+matches = [
+    item["identifier"] for item in json.load(sys.stdin).get("runtimes", [])
+    if item.get("isAvailable")
+    and item.get("version") == version
+    and ".SimRuntime.iOS-" in item.get("identifier", "")
+]
+if len(matches) != 1:
+    print(f"expected exactly one available iOS simulator runtime version={version!r}; found {len(matches)}", file=sys.stderr)
+    raise SystemExit(2)
+print(matches[0])
+' "$SIM_RUNTIME")" || exit $?
+  EPHEMERAL_SIM_NAME="${APP//[^[:alnum:]]/-}-full-$$"
+  SIM_UDID="$(xcrun simctl create "$EPHEMERAL_SIM_NAME" "$SIM_DEVICE_TYPE" "$SIM_RUNTIME_ID")" || exit $?
+  [ -n "$SIM_UDID" ] || { echo "failed to create isolated simulator: $SIM ($SIM_RUNTIME)"; exit 2; }
+  EPHEMERAL_SIM_UDID="$SIM_UDID"
+  SIM="$EPHEMERAL_SIM_NAME"
+else
+  SIM_UDID="$(xcrun simctl list devices available -j | python3 -c '
 import json
 import sys
 
@@ -60,7 +112,8 @@ if len(matches) != 1:
     raise SystemExit(2)
 print(matches[0])
 ' "$SIM" "$SIM_RUNTIME")" || exit $?
-[ -n "$SIM_UDID" ] || { echo "failed to resolve simulator: $SIM ($SIM_RUNTIME)"; exit 2; }
+  [ -n "$SIM_UDID" ] || { echo "failed to resolve simulator: $SIM ($SIM_RUNTIME)"; exit 2; }
+fi
 DEST="platform=iOS Simulator,id=$SIM_UDID"
 XCTEST_TIMEOUT_ARGS=()
 if [ "$MODE" = "--full" ]; then
@@ -76,6 +129,9 @@ V="$REPO/.verify"; rm -rf "$V"; mkdir -p "$V"
 DD="$V/DerivedData"
 say(){ printf '\n\033[1m[verify:%s] %s\033[0m\n' "$APP" "$*"; }
 [ -f "$REPO/spec.json" ] || { echo "no spec.json in $REPO"; exit 2; }
+if [ -z "$FLOOR" ]; then
+  FLOOR="$(python3 -c 'import json; print(json.load(open("spec.json")).get("coverage_floor", 0.55))')" || exit $?
+fi
 REDUCER="$(python3 -c 'import json;print(json.load(open("spec.json"))["core_loop"]["reducer"])' 2>/dev/null)"
 ORACLE="${REDUCER}ModelTests"
 
@@ -92,6 +148,7 @@ fi
 say "2. build + test ($MODE) — $SIM ${SIM_RUNTIME:+iOS $SIM_RUNTIME }[$SIM_UDID]"
 xcodegen generate >/dev/null 2>&1
 xcrun simctl boot "$SIM_UDID" >/dev/null 2>&1 || true
+xcrun simctl bootstatus "$SIM_UDID" -b >/dev/null || exit $?
 RB="$V/result.xcresult"
 ONLY=(-only-testing:"${APP}Tests/${ORACLE}")
 [ "$MODE" = "--full" ] && ONLY=()
