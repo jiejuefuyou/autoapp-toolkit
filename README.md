@@ -228,6 +228,14 @@ python3 toolkit/scripts/device_app_hygiene.py \
 See [the TestFlight and physical-device runbook](docs/testflight-device-distribution-runbook.md)
 before changing any tester, group, account, or device workflow.
 
+For an already processed app and a new metadata version of its existing IAP,
+use the [exact two-item App Review controller](docs/app-review-release-controller.md).
+It defaults to authenticated read-only preflight, binds clean remote `main` and
+current COMPLETE images, preserves the apps' physical release gates, and journals
+uncertain outcomes before scoped GET recovery. Submission requires the exact
+candidate confirmation and `AFTER_APPROVAL`; no binary, price or account writes
+are performed by this controller.
+
 ### 6. Launch day
 
 ```sh
