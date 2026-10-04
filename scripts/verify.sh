@@ -137,7 +137,15 @@ if [ "$MODE" = "--full" ]; then
     -maximum-test-execution-time-allowance 120
   )
 fi
-V="$REPO/.verify"; rm -rf "$V"; mkdir -p "$V"
+V="$REPO/.verify"
+mkdir -p "$V" || exit $?
+# Release archives share this directory. Remove only outputs owned by this gate;
+# preserve release/ and any other caller-owned evidence or recovery files.
+for artifact in DerivedData result.xcresult unit.xcresult ui.xcresult \
+  ui.attempt1.ax-initialization.xcresult build.log build.unit.log build.ui.log \
+  build.ui.attempt1.ax-initialization.log maestro maestro.log fast-spec.json verdict.json; do
+  rm -rf "$V/$artifact" || exit $?
+done
 DD="$V/DerivedData"
 say(){ printf '\n\033[1m[verify:%s] %s\033[0m\n' "$APP" "$*"; }
 [ -f "$REPO/spec.json" ] || { echo "no spec.json in $REPO"; exit 2; }
