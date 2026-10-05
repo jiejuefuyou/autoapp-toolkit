@@ -27,6 +27,11 @@ esac
 if [ "$MODE" = "--full" ]; then FLOOR="${3:-}"; else FLOOR="${3:-0}"; fi
 TK="$(cd "$(dirname "$0")/.." && pwd)"     # toolkit root (judge.py lives here)
 REPO="$(pwd)"                               # MUST be invoked from the app repo root
+require_quiet_test_audio() {
+  # Exit, rather than return: callers use conditionals for genuine test failures,
+  # which must never let an audio preflight failure fall through to the judge.
+  python3 "$TK/scripts/require_quiet_simulator.py" "$SIM_UDID" || exit $?
+}
 # Keep the fast gate on the newest installed portfolio simulator, while the full
 # StoreKit transaction oracle runs on the known-good iOS 18.4 runtime. Xcode
 # 26.6 + iOS 26.5 can load the StoreKit catalogue but never deliver the
@@ -125,7 +130,8 @@ replace_ephemeral_simulator() {
   SIM="$EPHEMERAL_SIM_NAME"
   DEST="platform=iOS Simulator,id=$SIM_UDID"
   xcrun simctl boot "$SIM_UDID" >/dev/null 2>&1 || true
-  xcrun simctl bootstatus "$SIM_UDID" -b >/dev/null
+  xcrun simctl bootstatus "$SIM_UDID" -b >/dev/null || return $?
+  require_quiet_test_audio
 }
 XCTEST_TIMEOUT_ARGS=()
 if [ "$MODE" = "--full" ]; then
@@ -169,6 +175,7 @@ say "2. build + test ($MODE) — $SIM ${SIM_RUNTIME:+iOS $SIM_RUNTIME }[$SIM_UDI
 xcodegen generate >/dev/null 2>&1
 xcrun simctl boot "$SIM_UDID" >/dev/null 2>&1 || true
 xcrun simctl bootstatus "$SIM_UDID" -b >/dev/null || exit $?
+require_quiet_test_audio
 RB="$V/result.xcresult"
 ONLY=(-only-testing:"${APP}Tests/${ORACLE}")
 [ "$MODE" = "--full" ] && ONLY=()
@@ -176,7 +183,9 @@ run_xcodebuild_test() {
   local result_bundle="$1"
   local log_path="$2"
   shift 2
+  require_quiet_test_audio
   xcodebuild test -scheme "$APP" "$@" -destination "$DEST" \
+    -parallel-testing-enabled NO \
     ${XCTEST_TIMEOUT_ARGS[@]+"${XCTEST_TIMEOUT_ARGS[@]}"} \
     -derivedDataPath "$DD" \
     -resultBundlePath "$result_bundle" -enableCodeCoverage YES CODE_SIGNING_ALLOWED=NO \
@@ -242,6 +251,7 @@ fi
 MA=()
 if [ "$MODE" = "--full" ] && [ "$XCODEBUILD_PASSED" -eq 1 ] && [ -d maestro ]; then
   say "3. maestro e2e"
+  require_quiet_test_audio
   # Install the product built by THIS invocation. Searching global DerivedData
   # made the old gate nondeterministic: `find | head -1` could install a stale
   # build from another runtime/repository clone.
