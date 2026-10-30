@@ -24,6 +24,7 @@ SHA before writes. No latest-build selection is performed.
 | --- | --- |
 | `--repo` | Clean candidate repository on `main`, with its configured `origin` |
 | `--app-id --iap-id --product-id --version --build` | Exact app, existing approved SKU, version and build identities |
+| `--release-type` | Desired `MANUAL` or `AFTER_APPROVAL` policy; default is `AFTER_APPROVAL` for existing callers |
 | `--release-receipt` | `local_testflight_release.py` processed release receipt: signed IPA at `artifact.ipa_path`, exact `ipa_sha256`, processed build and clean remote source readback |
 | `--metadata-receipt` | Applied draft metadata receipt: exact source, version ID, build ID and `readbacks` containing version/app-info localization IDs and reviewed field values |
 | `--iap-metadata-receipt` | Version-based IAP metadata applied receipt: unchanged parent SKU, no price writes, new version ID, version resource and localization readbacks |
@@ -32,6 +33,14 @@ SHA before writes. No latest-build selection is performed.
 | `--stage-receipt` | Successful exact App Store stage with all checks passing |
 | `--independent-preflight` | Independent read-only review, `ready_for_submission: true`, no blockers, exact IDs/SHA, and all checks passing |
 | `--receipt` | One stable journal path for this candidate and this immutable set of inputs |
+
+Select the release policy before independent review and use the same value in
+both preflight and submission. `MANUAL` requires the independent proof to say
+`"release_type": "MANUAL"` explicitly. A present proof value must always match
+the selected policy; unsupported or contradictory values block before ASC
+mutations. An absent proof field retains only the historical `AFTER_APPROVAL`
+meaning. It never authorizes `MANUAL`. The CLI and programmatic `Spec` accept
+only these two values.
 
 The store screenshot receipt's `uploaded` entries contain `locale`,
 `display_type`, `id`, `set_id`, `source_file_checksum`, `source_sha256` and
@@ -57,6 +66,8 @@ The independent preflight uses `checks` entries with `pass: true` (or `ok:
 true`), `independent_reviewer_no_mutations: true`, `remaining_blockers: []`, and
 the exact `app_id`, `bundle_id`, `version`, `build`, `build_id`,
 `source_git_sha`, `app_store_version_id` and `new_iap_metadata_version_id`.
+Include the reviewed `release_type` explicitly for new evidence, especially
+for an app contract that requires `MANUAL`.
 Do not fabricate these fields to satisfy the controller.
 
 For **PromptVault and WaterNow**, these additional independent proof fields
@@ -72,6 +83,10 @@ The apps' release-gate documents and issue/evidence prerequisites remain in
 force. This tool does not waive their camera, notifications, cloud/conflict,
 account, installation, transaction, tag or issue gates. An independent reviewer
 must record their actual completion before declaring the candidate ready.
+An app's stricter task-specific requirements still apply even when it is not
+one of the products with additional hardcoded fields here. For example,
+NewDaysUntil's independent proof must cover its required exact-device and
+TestFlight evidence; the generic controller does not establish those facts.
 Account Holder agreements, tax/banking and legal forms remain separately
 reviewed business evidence; the controller never accepts them.
 
@@ -90,6 +105,7 @@ args=(
   --app-id "$ASC_APP_ID" --iap-id "$ASC_IAP_ID"
   --product-id "$EXISTING_PRODUCT_ID"
   --version "$RELEASE_VERSION" --build "$RELEASE_BUILD_NUMBER"
+  --release-type MANUAL
   --release-receipt "$evidence_dir/processed-release.json"
   --metadata-receipt "$evidence_dir/candidate-metadata-applied.json"
   --iap-metadata-receipt "$evidence_dir/iap-candidate-metadata-applied.json"
@@ -123,7 +139,8 @@ Only these ASC mutations are possible:
 2. Add exactly one `appStoreVersion` item and one `inAppPurchaseVersion` item.
    Read their actual target relationships through the submission's scoped
    `/items?include=appStoreVersion,inAppPurchaseVersion` endpoint.
-3. Set only the candidate version's `releaseType` to `AFTER_APPROVAL`.
+3. If needed, set only the candidate version's `releaseType` to the selected
+   `MANUAL` or `AFTER_APPROVAL`. An already matching type needs no PATCH.
 4. Mark only the journal-owned exact two-item submission as submitted. Immediately
    before transmission, check the selected VALID build, clean exact source,
    never-submitted READY container, exact item targets and release type again.
@@ -136,6 +153,33 @@ pending operation instead of resending it. Never delete the journal and retry
 an uncertain create/submit. A changed evidence fingerprint blocks reuse; obtain
 an independent classification of the old operation before preparing a new
 candidate or journal.
+
+The selected policy is part of the evidence identity/fingerprint, new journal
+identity, every new operation context and the release-type PATCH body. An
+uncertain type PATCH is resolved by GET of its exact recorded version and
+intended value. A different or unknown value leaves the operation pending and
+stops; the controller does not replay that PATCH. The selected value is checked
+again immediately before submission and throughout confirmation. Once the
+candidate is submitted, a type mismatch blocks; this route does not switch a
+submitted version's release policy.
+
+Old schema-1 journals without a release-type identity are accepted only for
+`AFTER_APPROVAL`, with the complete original identity and input hashes matching
+the exact old `json.dumps(..., sort_keys=True)` fingerprint serialization. The
+original identity, fingerprint and operation history are retained; an explicit
+`legacy_release_type_interpretation` records that historical policy. Recorded
+release-type operations must target the same version and contain exactly the
+historical `AFTER_APPROVAL` PATCH body. Malformed/contradictory records and
+changed input files fail closed. A legacy journal can never become a MANUAL
+journal by adding a flag, editing evidence or deleting its pending operation.
+
+Read-only preflight may identify that a pre-submit adjustment is needed, but
+does not change the server. `desired_release_type` is intent;
+`release_type_readback` separately records the actual observed type, whether
+it matches, and whether adjustment is required. `confirmed_release_type` is
+written only after matching submission confirmation. Selecting MANUAL does not
+claim review approval or public release, and the exact confirmation token and
+read-only default remain unchanged.
 
 App and submission must reach `WAITING_FOR_REVIEW` or `IN_REVIEW`; the owned IAP
 metadata version must be waiting/in review, `ACCEPTED`, or already `APPROVED`.

@@ -233,8 +233,15 @@ use the [exact two-item App Review controller](docs/app-review-release-controlle
 It defaults to authenticated read-only preflight, binds clean remote `main` and
 current COMPLETE images, preserves the apps' physical release gates, and journals
 uncertain outcomes before scoped GET recovery. Submission requires the exact
-candidate confirmation and `AFTER_APPROVAL`; no binary, price or account writes
-are performed by this controller.
+candidate confirmation and a consistent reviewed release policy: use
+`--release-type MANUAL` when the app contract requires manual release, with
+matching explicit `release_type` in independent preflight evidence.
+`AFTER_APPROVAL` remains the backward-compatible default. The selected type is
+bound to evidence/journal identity and checked before transmission and during
+confirmation; old missing-policy journals can represent only proven historical
+`AFTER_APPROVAL`. Read-only output separates desired from observed type. No
+binary, price or account writes are performed by this controller, and MANUAL
+does not establish approval or public availability.
 
 ### 6. Launch day
 

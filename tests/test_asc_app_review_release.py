@@ -4,6 +4,8 @@ The fake ASC server applies real resource transitions and can lose responses.
 No credentials, account writes, simulator, or physical device are used.
 """
 import copy
+import hashlib
+import io
 import json
 import plistlib
 import subprocess
@@ -234,7 +236,11 @@ class FakeASC:
                     self.f.iap_version["attributes"]["state"] = "READY_FOR_REVIEW"
                 result = {"data": item}
             elif kind == "release-type":
-                self.f.version["attributes"]["releaseType"] = "AFTER_APPROVAL"
+                assert method == "PATCH" and path == "/v1/appStoreVersions/version"
+                assert data["type"] == "appStoreVersions" and data["id"] == "version"
+                assert set(data["attributes"]) == {"releaseType"}
+                assert data["attributes"]["releaseType"] in {"MANUAL", "AFTER_APPROVAL"}
+                self.f.version["attributes"]["releaseType"] = data["attributes"]["releaseType"]
                 result = {"data": self.f.version}
             elif kind == "submit":
                 self.submission_transmitted = True
@@ -667,6 +673,347 @@ class ControllerTests(unittest.TestCase):
                                     "/v1/appStoreVersions/version", "/v1/reviewSubmissions/created"})
             self.assertNotIn("price", json.dumps(body).lower())
             self.assertNotIn("canceled", json.dumps(body).lower())
+
+    def policy_fixture(self, policy, current=None, explicit=True):
+        directory = Path(tempfile.mkdtemp(dir=self.root))
+        self.f = Fixture(directory)
+        self.f.spec = replace(self.f.spec, release_type=policy)
+        if explicit:
+            self.f.edit("proof", lambda p: p.update(release_type=policy))
+        if current is not None:
+            self.f.version["attributes"]["releaseType"] = current
+        self.api = FakeASC(self.f)
+
+    def legacy_journal(self, pending=None, operations=None):
+        evidence = release.Evidence(self.f.spec)
+        identity = {k: v for k, v in evidence.identity.items() if k != "release_type"}
+        # Independent reproduction of the original json.dumps serialization.
+        fingerprint = hashlib.sha256(json.dumps({"identity": identity, "files": evidence.files},
+                                                sort_keys=True).encode()).hexdigest()
+        journal = {"schema_version": 1, "controller": "autoapp-toolkit/asc_app_review_release.py",
+                   "started_at": "historical-start", "identity": identity, "input_sha256": evidence.files,
+                   "fingerprint": fingerprint, "operations": operations or [], "pending": pending,
+                   "review_submitted": False, "public_release_claimed": False}
+        release.save(self.f.spec.receipt, journal)
+        return journal
+
+    def legacy_release_operation(self, policy="AFTER_APPROVAL"):
+        return {"kind": "release-type", "method": "PATCH", "path": "/v1/appStoreVersions/version",
+                "body": {"data": {"type": "appStoreVersions", "id": "version",
+                                  "attributes": {"releaseType": policy}}}, "context": {},
+                "started_at": "historical-write", "status": "outcome_unknown"}
+
+    def test_manual_already_selected_preserves_reviewed_policy_without_patch(self):
+        self.policy_fixture("MANUAL", "MANUAL")
+        result = self.submit()
+        self.assertEqual(self.f.version["attributes"]["releaseType"], "MANUAL")
+        self.assertEqual(result["identity"]["release_type"], "MANUAL")
+        self.assertEqual(result["desired_release_type"], "MANUAL")
+        self.assertEqual(result["confirmed_release_type"], "MANUAL")
+        self.assertTrue(result["release_type_readback"]["matches"])
+        self.assertFalse(result["public_release_claimed"])
+        self.assertEqual(len(self.api.writes), 4)
+        self.assertFalse(any(path.startswith("/v1/appStoreVersions/") for _, path, _ in self.api.writes))
+        self.submit()
+        self.assertEqual(len(self.api.writes), 4)
+
+    def test_explicit_both_modes_change_opposite_type_once_using_real_payload(self):
+        for policy, current in [("MANUAL", "AFTER_APPROVAL"), ("AFTER_APPROVAL", "MANUAL")]:
+            with self.subTest(policy=policy):
+                self.policy_fixture(policy, current)
+                result = self.submit()
+                writes = [w for w in self.api.writes if w[1].startswith("/v1/appStoreVersions/")]
+                self.assertEqual(len(writes), 1)
+                self.assertEqual(writes[0][2]["data"]["attributes"], {"releaseType": policy})
+                operation = next(o for o in result["operations"] if o["kind"] == "release-type")
+                self.assertEqual(operation["context"], {"release_type": policy, "version_id": "version"})
+                self.assertTrue(all(o["context"]["release_type"] == policy for o in result["operations"]))
+                self.assertEqual(result["confirmed_release_type"], policy)
+                self.submit()
+                self.assertEqual(len(self.api.writes), 5)
+
+    def test_read_only_both_modes_distinguish_desired_observed_adjustment(self):
+        for policy, current in [("MANUAL", "AFTER_APPROVAL"), ("AFTER_APPROVAL", "MANUAL")]:
+            with self.subTest(policy=policy):
+                self.policy_fixture(policy, current)
+                result = self.controller().run()
+                self.assertEqual(result["desired_release_type"], policy)
+                readback = result["release_type_readback"]
+                self.assertEqual((readback["desired"], readback["observed"], readback["matches"], readback["adjustment_required"]),
+                                 (policy, current, False, True))
+                self.assertNotIn("confirmed_release_type", result)
+                self.assertEqual(self.api.writes, [])
+
+    def test_unsupported_policy_and_manual_missing_or_mismatched_proof_fail_before_api(self):
+        for value in ["INVALID", "SCHEDULED", "manual", None, True]:
+            with self.subTest(value=value), self.assertRaisesRegex(release.ReleaseError, "release_type"):
+                replace(self.f.spec, release_type=value)
+        self.policy_fixture("MANUAL", explicit=False)
+        with self.assertRaisesRegex(release.ReleaseError, "explicit independent"):
+            self.controller()
+        for proof in ["AFTER_APPROVAL", "invalid", None, True]:
+            self.f.edit("proof", lambda p: p.update(release_type=proof))
+            with self.subTest(proof=proof), self.assertRaisesRegex(release.ReleaseError, "release_type mismatch"):
+                self.controller()
+        self.assertEqual(self.api.gets, [])
+        self.assertEqual(self.api.writes, [])
+
+    def test_explicit_after_rejects_manual_proof_and_default_remains_after(self):
+        self.assertEqual(self.f.spec.release_type, "AFTER_APPROVAL")
+        self.f.edit("proof", lambda p: p.update(release_type="MANUAL"))
+        with self.assertRaisesRegex(release.ReleaseError, "release_type mismatch"):
+            self.controller()
+        self.assertEqual(self.api.gets, [])
+
+    def test_policy_is_part_of_fingerprint_even_with_same_input_hashes(self):
+        evidence = release.Evidence(self.f.spec)
+        same_files_other_policy = dict(evidence.identity, release_type="MANUAL")
+        other = hashlib.sha256(json.dumps({"identity": same_files_other_policy, "files": evidence.files},
+                                         sort_keys=True).encode()).hexdigest()
+        self.assertNotEqual(evidence.fingerprint, other)
+        self.assertNotEqual(evidence.fingerprint, evidence.legacy_fingerprint)
+        self.assertEqual(evidence.identity["release_type"], "AFTER_APPROVAL")
+
+    def test_changed_policy_and_evidence_cannot_recover_or_mutate_existing_journal(self):
+        self.policy_fixture("AFTER_APPROVAL", "MANUAL")
+        self.api.crash.add("release-type")
+        with self.assertRaises(SystemExit):
+            self.submit()
+        before = self.f.spec.receipt.read_bytes()
+        get_count, write_count = len(self.api.gets), len(self.api.writes)
+        self.f.spec = replace(self.f.spec, release_type="MANUAL")
+        self.f.edit("proof", lambda p: p.update(release_type="MANUAL"))
+        with self.assertRaisesRegex(release.ReleaseError, "different release evidence or policy"):
+            self.controller()
+        self.assertEqual(self.f.spec.receipt.read_bytes(), before)
+        self.assertEqual((len(self.api.gets), len(self.api.writes)), (get_count, write_count))
+
+    def test_exact_legacy_after_journal_keeps_original_identity_hashes_and_history(self):
+        self.policy_fixture("AFTER_APPROVAL", explicit=False)
+        original = self.legacy_journal()
+        result = self.controller().run()
+        for key in ["identity", "input_sha256", "fingerprint", "started_at", "operations"]:
+            self.assertEqual(result[key], original[key])
+        self.assertEqual(result["legacy_release_type_interpretation"]["release_type"], "AFTER_APPROVAL")
+        self.assertEqual(result["desired_release_type"], "AFTER_APPROVAL")
+        self.assertEqual(self.api.writes, [])
+        self.assertTrue(self.submit()["review_submitted"])
+        self.submit()
+        self.assertEqual(len(self.api.writes), 5)
+
+    def test_legacy_manual_rejected_even_if_proof_and_old_hash_are_manually_consistent(self):
+        self.policy_fixture("MANUAL", "MANUAL")
+        self.legacy_journal()
+        before = self.f.spec.receipt.read_bytes()
+        with self.assertRaisesRegex(release.ReleaseError, "legacy journal cannot be reused for MANUAL"):
+            self.controller()
+        self.assertEqual(self.f.spec.receipt.read_bytes(), before)
+        self.assertEqual(self.api.gets, [])
+        self.assertEqual(self.api.writes, [])
+
+    def test_legacy_exact_original_serialization_and_all_identity_hashes_required(self):
+        for alteration in ["compact", "identity", "input_hash", "fingerprint"]:
+            with self.subTest(alteration=alteration):
+                self.policy_fixture("AFTER_APPROVAL", explicit=False)
+                journal = self.legacy_journal()
+                if alteration == "compact":
+                    journal["fingerprint"] = hashlib.sha256(json.dumps({"identity": journal["identity"], "files": journal["input_sha256"]},
+                                                                      sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                elif alteration == "identity":
+                    journal["identity"]["build"] = "99"
+                elif alteration == "input_hash":
+                    journal["input_sha256"][str(self.f.paths["proof"].resolve())] = "b" * 64
+                else:
+                    journal["fingerprint"] = "b" * 64
+                release.save(self.f.spec.receipt, journal)
+                with self.assertRaisesRegex(release.ReleaseError, "exact original"):
+                    self.controller()
+                self.assertEqual(self.api.gets, [])
+
+    def test_legacy_contradictory_release_operations_or_malformed_records_fail_closed(self):
+        changes = [lambda j: j.update(desired_release_type="MANUAL"),
+                   lambda j: j.update(legacy_release_type_interpretation={"release_type": "MANUAL"}),
+                   lambda j: j.update(operations={}), lambda j: j.update(pending={}),
+                   lambda j: j["operations"].append(None),
+                   lambda j: j["operations"][0]["body"]["data"]["attributes"].update(releaseType="MANUAL"),
+                   lambda j: j["operations"][0]["body"]["data"].update(id="foreign-version"),
+                   lambda j: j["operations"][0].update(path="/v1/appStoreVersions/foreign"),
+                   lambda j: j["operations"][0].update(method="POST"),
+                   lambda j: j["operations"][0].update(context={"release_type": "MANUAL"}),
+                   lambda j: j["operations"][0]["body"]["data"]["attributes"].update(price="changed")]
+        for change in changes:
+            self.policy_fixture("AFTER_APPROVAL", explicit=False)
+            journal = self.legacy_journal(operations=[self.legacy_release_operation()])
+            change(journal)
+            release.save(self.f.spec.receipt, journal)
+            before = self.f.spec.receipt.read_bytes()
+            with self.assertRaises(release.ReleaseError):
+                self.controller()
+            self.assertEqual(self.f.spec.receipt.read_bytes(), before)
+            self.assertEqual(self.api.gets, [])
+            self.assertEqual(self.api.writes, [])
+
+    def test_legacy_release_pending_recovers_exact_recorded_version_without_patch(self):
+        self.policy_fixture("AFTER_APPROVAL", "AFTER_APPROVAL", explicit=False)
+        journal = self.legacy_journal(pending=self.legacy_release_operation())
+        journal["review_submission_id"] = "owned"
+        release.save(self.f.spec.receipt, journal)
+        self.api.add_container("owned")
+        controller = self.controller()
+        controller.resolve_pending()
+        self.assertEqual(self.api.gets, [("/v1/appStoreVersions/version", None)])
+        self.assertEqual(self.api.writes, [])
+        self.assertIsNone(controller.journal["pending"])
+        self.assertEqual(controller.journal["operations"][0]["context"], {}, "do not rewrite historical operation")
+
+    def test_both_modes_release_response_loss_and_crash_recover_without_duplicate_patch(self):
+        for policy, current in [("MANUAL", "AFTER_APPROVAL"), ("AFTER_APPROVAL", "MANUAL")]:
+            for failure in ["lose", "crash"]:
+                with self.subTest(policy=policy, failure=failure):
+                    self.policy_fixture(policy, current)
+                    getattr(self.api, failure).add("release-type")
+                    if failure == "crash":
+                        with self.assertRaises(SystemExit):
+                            self.submit()
+                        pending = release.read_json(self.f.spec.receipt)["pending"]
+                        self.assertEqual(pending["body"]["data"]["attributes"], {"releaseType": policy})
+                        self.api.crash.clear()
+                    result = self.submit()
+                    self.assertEqual(result["confirmed_release_type"], policy)
+                    self.submit()
+                    self.assertEqual(sum(p.startswith("/v1/appStoreVersions/") for _, p, _ in self.api.writes), 1)
+
+    def test_both_modes_unapplied_release_patch_retains_pending_and_never_replays(self):
+        for policy, current in [("MANUAL", "AFTER_APPROVAL"), ("AFTER_APPROVAL", "MANUAL")]:
+            with self.subTest(policy=policy):
+                self.policy_fixture(policy, current)
+                self.api.no_apply.add("release-type")
+                for _ in range(2):
+                    with self.assertRaisesRegex(release.ReleaseError, "unknown release-type outcome"):
+                        self.submit()
+                journal = release.read_json(self.f.spec.receipt)
+                self.assertEqual(journal["pending"]["kind"], "release-type")
+                self.assertEqual(journal["pending"]["release_type_recovery_readback"]["observed"], current)
+                self.assertFalse(journal["pending"]["release_type_recovery_readback"]["matches"])
+                self.assertEqual(sum(p.startswith("/v1/appStoreVersions/") for _, p, _ in self.api.writes), 1)
+                self.assertFalse(any(p.startswith("/v1/reviewSubmissions/") for _, p, _ in self.api.writes))
+
+    def test_unknown_release_type_get_preserves_pending_without_retransmission(self):
+        for policy, current in [("MANUAL", "AFTER_APPROVAL"), ("AFTER_APPROVAL", "MANUAL")]:
+            self.policy_fixture(policy, current)
+            self.api.no_apply.add("release-type")
+            with self.assertRaisesRegex(release.ReleaseError, "unknown release-type outcome"):
+                self.submit()
+            writes = len(self.api.writes)
+            self.f.version["attributes"].pop("releaseType")
+            with self.assertRaisesRegex(release.ReleaseError, "unknown release-type outcome"):
+                self.controller().run()
+            self.assertEqual(len(self.api.writes), writes)
+            pending = release.read_json(self.f.spec.receipt)["pending"]
+            self.assertEqual(pending["kind"], "release-type")
+            self.assertIsNone(pending["release_type_recovery_readback"]["observed"])
+
+    def test_new_journal_operation_policy_and_release_payload_are_validated_before_get(self):
+        self.policy_fixture("MANUAL", "AFTER_APPROVAL")
+        self.api.crash.add("release-type")
+        with self.assertRaises(SystemExit):
+            self.submit()
+        original = release.read_json(self.f.spec.receipt)
+        before_counts = len(self.api.gets), len(self.api.writes)
+        for key, value in [("release_type", "AFTER_APPROVAL"), ("version_id", "foreign")]:
+            journal = copy.deepcopy(original)
+            journal["pending"]["context"][key] = value
+            release.save(self.f.spec.receipt, journal)
+            with self.assertRaises(release.ReleaseError):
+                self.controller()
+            self.assertEqual((len(self.api.gets), len(self.api.writes)), before_counts)
+
+    def test_contradictory_direct_type_write_is_blocked_before_source_or_api(self):
+        self.policy_fixture("MANUAL", "MANUAL")
+        controller = self.controller()
+        with self.assertRaisesRegex(release.ReleaseError, "target/body mismatch"):
+            controller.mutate("release-type", "PATCH", "/v1/appStoreVersions/version", {"data": {
+                "type": "appStoreVersions", "id": "version", "attributes": {"releaseType": "AFTER_APPROVAL"}}}, {})
+        self.assertEqual(self.api.gets, [])
+        self.assertEqual(self.api.writes, [])
+
+    def test_wrong_type_late_before_submit_blocks_both_modes(self):
+        for policy, opposite in [("MANUAL", "AFTER_APPROVAL"), ("AFTER_APPROVAL", "MANUAL")]:
+            with self.subTest(policy=policy):
+                self.policy_fixture(policy, policy)
+                controller = self.owned_prepared_controller()
+                self.f.version["attributes"]["releaseType"] = policy
+                get = self.api.get
+                def late_get(path, params=None):
+                    payload = get(path, params)
+                    if path == "/v1/appInfoLocalizations/info-loc-de-DE":
+                        self.f.version["attributes"]["releaseType"] = opposite
+                    return payload
+                self.api.get = late_get
+                with self.assertRaisesRegex(release.ReleaseError, "selected release type changed before submission"):
+                    controller.mutate("submit", "PATCH", "/v1/reviewSubmissions/owned", {"data": {
+                        "type": "reviewSubmissions", "id": "owned", "attributes": {"submitted": True}}}, {})
+                self.assertEqual(self.api.writes, [])
+
+    def test_wrong_type_during_confirmation_and_read_only_resume_never_switches_policy(self):
+        for policy, opposite in [("MANUAL", "AFTER_APPROVAL"), ("AFTER_APPROVAL", "MANUAL")]:
+            with self.subTest(policy=policy):
+                self.policy_fixture(policy, policy)
+                write = self.api.write
+                def changed_after_submit(method, path, body):
+                    result = write(method, path, body)
+                    if path.startswith("/v1/reviewSubmissions/"):
+                        self.f.version["attributes"]["releaseType"] = opposite
+                    return result
+                self.api.write = changed_after_submit
+                with self.assertRaisesRegex(release.ReleaseError, "release type changed after submission"):
+                    self.submit()
+                writes = len(self.api.writes)
+                journal = release.read_json(self.f.spec.receipt)
+                self.assertEqual(journal["release_type_readback"]["observed"], opposite)
+                self.assertFalse(journal["review_submitted"])
+                with self.assertRaisesRegex(release.ReleaseError, "release type changed after submission"):
+                    self.controller().run()
+                self.assertEqual(len(self.api.writes), writes)
+
+    def test_manual_submit_response_loss_and_process_death_remain_idempotent(self):
+        for failure in ["lose", "crash"]:
+            self.policy_fixture("MANUAL", "MANUAL")
+            getattr(self.api, failure).add("submit")
+            if failure == "crash":
+                with self.assertRaises(SystemExit):
+                    self.submit()
+                self.api.crash.clear()
+            self.assertTrue(self.submit()["review_submitted"])
+            self.submit()
+            self.assertEqual(sum(p.startswith("/v1/reviewSubmissions/") for _, p, _ in self.api.writes), 1)
+
+    def test_missing_or_unsupported_live_type_blocks_before_any_write(self):
+        for current in [None, "SCHEDULED", "unknown"]:
+            self.policy_fixture("MANUAL", "MANUAL")
+            self.f.version["attributes"]["releaseType"] = current
+            with self.assertRaisesRegex(release.ReleaseError, "live release type is missing or unsupported"):
+                self.submit()
+            self.assertEqual(self.api.writes, [])
+
+    def test_cli_accepts_both_modes_default_and_rejects_invalid_before_evidence(self):
+        required = []
+        for name in ["repo", "release-receipt", "metadata-receipt", "iap-metadata-receipt", "iap-image-receipt",
+                     "paywall-image", "store-image-receipt", "stage-receipt", "independent-preflight", "receipt"]:
+            required.extend(["--" + name, "fixture-path"])
+        for name in ["app-id", "iap-id", "product-id", "version", "build"]:
+            required.extend(["--" + name, "fixture-value"])
+        observed = []
+        def stop_at_evidence(spec):
+            observed.append(spec.release_type)
+            raise release.ReleaseError("offline stop")
+        for flags in [[], ["--release-type", "MANUAL"], ["--release-type", "AFTER_APPROVAL"]]:
+            with patch.object(release, "Evidence", side_effect=stop_at_evidence), patch("sys.stderr", new_callable=io.StringIO):
+                self.assertEqual(release.main(required + flags), 1)
+        self.assertEqual(observed, ["AFTER_APPROVAL", "MANUAL", "AFTER_APPROVAL"])
+        with patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit) as caught:
+            release.main(required + ["--release-type", "SCHEDULED"])
+        self.assertEqual(caught.exception.code, 2)
 
 
 class RealGitContractTests(unittest.TestCase):

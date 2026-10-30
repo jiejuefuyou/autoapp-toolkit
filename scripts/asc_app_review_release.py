@@ -28,6 +28,8 @@ from typing import Any
 import asc_app_store_stage as stage
 import asc_monitor as asc
 
+RELEASE_TYPES = ("AFTER_APPROVAL", "MANUAL")
+
 
 class ReleaseError(RuntimeError):
     """Required release evidence or an unambiguous server outcome is missing."""
@@ -95,6 +97,11 @@ class Spec:
     stage_receipt: Path
     independent_preflight: Path
     receipt: Path
+    release_type: str = "AFTER_APPROVAL"
+
+    def __post_init__(self) -> None:
+        require(isinstance(self.release_type, str) and self.release_type in RELEASE_TYPES,
+                "release_type must be MANUAL or AFTER_APPROVAL")
 
 
 def all_checks_pass(payload: dict[str, Any], label: str) -> None:
@@ -204,6 +211,12 @@ class Evidence:
                 "staging receipt identity mismatch")
         all_checks_pass(self.staged, "stage")
         p = self.proof
+        if "release_type" in p:
+            require(p["release_type"] in RELEASE_TYPES and p["release_type"] == spec.release_type,
+                    "independent preflight release_type mismatch")
+        else:
+            require(spec.release_type == "AFTER_APPROVAL",
+                    "MANUAL requires explicit independent preflight release_type")
         require(p.get("ready_for_submission") is True and p.get("independent_reviewer_no_mutations") is True
                 and p.get("remaining_blockers") == [], "independent preflight is not ready")
         expected_proof = {"app_id": spec.app_id, "bundle_id": self.bundle_id, "version": spec.version,
@@ -274,6 +287,12 @@ class Evidence:
                          "store_screenshot_locales": sorted({r.get("locale") for r in uploaded}),
                          "repo": str(spec.repo.resolve())}
         require(str(spec.receipt.resolve()) not in self.files, "receipt aliases an input image or selection plan")
+        # Preserve the original schema-1 serialization exactly for proven old
+        # AFTER_APPROVAL journals. Their identity and input hashes stay intact.
+        self.legacy_identity = self.identity.copy()
+        self.legacy_fingerprint = hashlib.sha256(json.dumps({"identity": self.legacy_identity, "files": self.files},
+                                                            sort_keys=True).encode()).hexdigest()
+        self.identity["release_type"] = spec.release_type
         self.fingerprint = hashlib.sha256(json.dumps({"identity": self.identity, "files": self.files},
                                                      sort_keys=True).encode()).hexdigest()
 
@@ -351,9 +370,57 @@ class Controller:
         self.journal = read_json(self.s.receipt) if self.s.receipt.exists() else {
             "schema_version": 1, "controller": "autoapp-toolkit/asc_app_review_release.py", "started_at": now(),
             "fingerprint": evidence.fingerprint, "identity": evidence.identity, "input_sha256": evidence.files,
+            "desired_release_type": self.s.release_type,
             "operations": [], "pending": None, "review_submitted": False, "public_release_claimed": False}
-        require(self.journal.get("schema_version") == 1 and self.journal.get("fingerprint") == evidence.fingerprint,
-                "existing receipt belongs to different release evidence")
+        require(self.journal.get("schema_version") == 1, "unsupported release journal schema")
+        identity = self.journal.get("identity")
+        require(isinstance(identity, dict), "release journal identity is missing")
+        self.legacy_journal = "release_type" not in identity
+        if self.legacy_journal:
+            require(self.s.release_type == "AFTER_APPROVAL", "legacy journal cannot be reused for MANUAL")
+            require(identity == evidence.legacy_identity
+                    and self.journal.get("input_sha256") == evidence.files
+                    and self.journal.get("fingerprint") == evidence.legacy_fingerprint,
+                    "legacy journal does not match exact original identity/input fingerprint")
+            require(self.journal.get("desired_release_type", "AFTER_APPROVAL") == "AFTER_APPROVAL",
+                    "legacy journal contradicts historical AFTER_APPROVAL policy")
+            interpretation = {"release_type": "AFTER_APPROVAL", "legacy_fingerprint": evidence.legacy_fingerprint,
+                              "basis": "original schema-1 controller default"}
+            require("legacy_release_type_interpretation" not in self.journal
+                    or self.journal["legacy_release_type_interpretation"] == interpretation,
+                    "legacy release-type interpretation mismatch")
+            self.journal["legacy_release_type_interpretation"] = interpretation
+            self.journal["desired_release_type"] = "AFTER_APPROVAL"
+        else:
+            require(identity == evidence.identity and self.journal.get("input_sha256") == evidence.files
+                    and self.journal.get("fingerprint") == evidence.fingerprint
+                    and self.journal.get("desired_release_type") == self.s.release_type,
+                    "existing receipt belongs to different release evidence or policy")
+        operations = self.journal.get("operations")
+        require(isinstance(operations, list), "release journal operations are malformed")
+        for operation in operations:
+            self.validate_operation_policy(operation)
+        pending = self.journal.get("pending")
+        require(pending is None or isinstance(pending, dict) and bool(pending), "release journal pending operation is malformed")
+        if pending is not None:
+            self.validate_operation_policy(pending)
+
+    def validate_operation_policy(self, operation: dict[str, Any]) -> None:
+        require(isinstance(operation, dict) and operation.get("kind") in {
+            "create", "item:appStoreVersion", "item:inAppPurchaseVersion", "release-type", "submit"},
+            "release journal operation is malformed")
+        context = operation.get("context")
+        require(isinstance(context, dict), "release journal operation context is malformed")
+        require(context.get("release_type", "AFTER_APPROVAL" if self.legacy_journal else None) == self.s.release_type,
+                "journal operation release_type mismatch")
+        if operation["kind"] == "release-type":
+            expected_body = {"data": {"type": "appStoreVersions", "id": self.e.version_id,
+                                      "attributes": {"releaseType": self.s.release_type}}}
+            require(operation.get("method") == "PATCH"
+                    and operation.get("path") == f"/v1/appStoreVersions/{self.e.version_id}"
+                    and operation.get("body") == expected_body
+                    and context.get("version_id", self.e.version_id if self.legacy_journal else None) == self.e.version_id,
+                    "journal release-type operation target/body mismatch")
 
     def persist(self) -> None:
         save(self.s.receipt, self.journal)
@@ -412,7 +479,13 @@ class Controller:
         require(asc.relationship_id(iv, "inAppPurchase") == s.iap_id, "IAP metadata version belongs to a foreign SKU")
         require(isinstance(iv.get("attributes", {}).get("version"), int)
                 and iv["attributes"]["version"] > 1, "IAP metadata is not a new version of approved product")
-        state_readback = {"observed_at": now(), "version": v, "selected_build": b, "iap_version": iv}
+        observed_release_type = v.get("attributes", {}).get("releaseType")
+        self.journal["release_type_readback"] = {
+            "observed_at": now(), "version_id": e.version_id, "desired": s.release_type,
+            "observed": observed_release_type, "matches": observed_release_type == s.release_type,
+            "adjustment_required": observed_release_type != s.release_type}
+        state_readback = {"observed_at": now(), "version": v, "selected_build": b, "iap_version": iv,
+                          "desired_release_type": s.release_type}
         self.journal["last_candidate_state_readback"] = state_readback
         if record_poll:
             rid = self.journal["review_submission_id"]
@@ -427,6 +500,9 @@ class Controller:
         if self.journal.get("submitted_request_at"):
             iap_allowed |= {"ACCEPTED", "APPROVED"}
         app_state, iap_state = asc.state_of(v.get("attributes", {})), iv.get("attributes", {}).get("state")
+        require(observed_release_type in RELEASE_TYPES, "live release type is missing or unsupported")
+        if self.journal.get("submitted_request_at") or app_state in {"WAITING_FOR_REVIEW", "IN_REVIEW"}:
+            require(observed_release_type == s.release_type, "release type changed after submission; no policy switching")
         require(app_state in allowed and iap_state in iap_allowed,
                 f"app/IAP version is rejected, submitted externally, or otherwise ineligible: app={app_state} IAP={iap_state}")
         if iap_state in {"ACCEPTED", "APPROVED"}:
@@ -517,6 +593,7 @@ class Controller:
         return rows
 
     def recover(self, operation: dict[str, Any]) -> dict[str, Any]:
+        self.validate_operation_policy(operation)
         kind, context = operation["kind"], operation["context"]
         if kind == "create":
             rows = [r for r in self.reviews() if r["id"] not in context["before_ids"]
@@ -534,8 +611,14 @@ class Controller:
             require(asc.relationship_id(new[0], other) is None, "new review item has an unexpected second target")
             return new[0]
         if kind == "release-type":
-            v = resource(self.api.get(f"/v1/appStoreVersions/{self.e.version_id}"), "appStoreVersions", self.e.version_id)
-            require(v.get("attributes", {}).get("releaseType") == "AFTER_APPROVAL", "unknown release-type outcome; do not retry")
+            version_id = operation["body"]["data"]["id"]
+            intended = operation["body"]["data"]["attributes"]["releaseType"]
+            v = resource(self.api.get(f"/v1/appStoreVersions/{version_id}"), "appStoreVersions", version_id)
+            observed = v.get("attributes", {}).get("releaseType")
+            operation["release_type_recovery_readback"] = {"observed_at": now(), "version_id": version_id,
+                "desired": intended, "observed": observed, "matches": observed == intended}
+            self.persist()  # Keep the exact GET outcome even when it remains unresolved.
+            require(observed == intended, "unknown release-type outcome; do not retry")
             return v
         require(kind == "submit", "unknown journal operation")
         r = self.review(rid)
@@ -564,6 +647,16 @@ class Controller:
 
     def mutate(self, kind: str, method: str, path: str, body: dict[str, Any], context: dict[str, Any]) -> None:
         require(self.journal.get("pending") is None, "unresolved write journal blocks another mutation")
+        require("release_type" not in context or context["release_type"] == self.s.release_type,
+                "mutation context contradicts selected release type")
+        context = dict(context, release_type=self.s.release_type)
+        if kind == "release-type":
+            require("version_id" not in context or context["version_id"] == self.e.version_id,
+                    "mutation release-type target mismatch")
+            context["version_id"] = self.e.version_id
+        operation = {"kind": kind, "method": method, "path": path, "body": body,
+                     "context": context, "started_at": now(), "status": "pending"}
+        self.validate_operation_policy(operation)
         self.check_source()
         self.live_evidence()
         current_containers = self.validate_containers()
@@ -590,17 +683,16 @@ class Controller:
                 current_version = resource(self.api.get(f"/v1/appStoreVersions/{self.e.version_id}"),
                                            "appStoreVersions", self.e.version_id)
                 current_attrs = current_version.get("attributes", {})
-                require(current_attrs.get("releaseType") == "AFTER_APPROVAL"
+                require(current_attrs.get("releaseType") == self.s.release_type
                         and current_attrs.get("versionString") == self.s.version
                         and current_attrs.get("platform") == "IOS"
                         and asc.state_of(current_attrs) == "READY_FOR_REVIEW",
-                        "exact READY iOS version or AFTER_APPROVAL release type changed before submission")
+                        "exact READY iOS version or selected release type changed before submission")
                 current_iap = resource(self.api.get(f"/v1/inAppPurchaseVersions/{self.e.iap_version_id}"),
                                        "inAppPurchaseVersions", self.e.iap_version_id)
                 require(current_iap.get("attributes", {}).get("state") == "READY_FOR_REVIEW",
                         "IAP metadata version is not READY at submission")
-        operation = {"kind": kind, "method": method, "path": path, "body": body,
-                     "context": context, "started_at": now(), "status": "pending"}
+        operation["started_at"] = now()
         self.journal["pending"] = operation
         self.persist()  # Durable before transmission; a process crash resumes with GET.
         try:
@@ -683,10 +775,10 @@ class Controller:
             self.journal["exact_two_items_before_submit"] = exact_items
             self.persist()
             live = self.live_evidence()
-            if live["version"].get("attributes", {}).get("releaseType") != "AFTER_APPROVAL":
+            if live["version"].get("attributes", {}).get("releaseType") != self.s.release_type:
                 self.mutate("release-type", "PATCH", f"/v1/appStoreVersions/{self.e.version_id}", {"data": {
                     "type": "appStoreVersions", "id": self.e.version_id,
-                    "attributes": {"releaseType": "AFTER_APPROVAL"}}}, {})
+                    "attributes": {"releaseType": self.s.release_type}}}, {})
             self.exact_items(rid, complete=True)
             require(self.review(rid).get("attributes", {}).get("state") == "READY_FOR_REVIEW", "review state changed before submit")
             self.mutate("submit", "PATCH", f"/v1/reviewSubmissions/{rid}", {"data": {
@@ -700,7 +792,7 @@ class Controller:
             live = self.live_evidence(record_poll=True)
             r = self.journal["poll_readbacks"][-1]["review_submission"]
             self.exact_items(rid, complete=True)
-            require(live["version"].get("attributes", {}).get("releaseType") == "AFTER_APPROVAL", "release type changed")
+            require(live["version"].get("attributes", {}).get("releaseType") == self.s.release_type, "release type changed")
             review_state = r.get("attributes", {}).get("state")
             require(review_state in {"READY_FOR_REVIEW", "WAITING_FOR_REVIEW", "IN_REVIEW"},
                     f"review submission entered an ineligible state: {review_state}")
@@ -712,6 +804,7 @@ class Controller:
             require(time.monotonic() < deadline, "exact app + IAP review acceptance is not confirmed; preserve journal")
             time.sleep(min(5, max(0, deadline - time.monotonic())))
         self.journal.update({"confirmed_at": now(), "review_submitted": True, "public_release_claimed": False,
+                             "confirmed_release_type": live["version"]["attributes"]["releaseType"],
                              "review_readback": r, "version_readback": live["version"],
                              "iap_version_readback": live["iap_version"], "selected_build_readback": live["build"],
                              "physical_test_proved": self.e.proof.get("physical_release_gate_completed") is True,
@@ -729,6 +822,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument("--" + name, required=True, type=Path)
     for name in ["app-id", "iap-id", "product-id", "version", "build"]:
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--release-type", choices=RELEASE_TYPES, default="AFTER_APPROVAL",
+                        help="selected release policy; MANUAL requires matching independent proof")
     parser.add_argument("--submit", action="store_true", help="perform journaled app + IAP review submission")
     parser.add_argument("--confirm", help="exact submit-<lowercase app name>-<version> token")
     args = parser.parse_args(argv)
@@ -747,7 +842,9 @@ def main(argv: list[str] | None = None) -> int:
                 raise ReleaseError("another controller owns this receipt lock") from error
             result = Controller(evidence, API()).run(submit, confirm)
         state = "APP_REVIEW_CONFIRMED" if result.get("review_submitted") else "READ_ONLY_PREFLIGHT_OK"
-        print(f"{evidence.name} {state} {spec.version}/{spec.build} public_release=false")
+        observed = result.get("release_type_readback", {}).get("observed")
+        print(f"{evidence.name} {state} {spec.version}/{spec.build} "
+              f"desired_release_type={spec.release_type} observed_release_type={observed} public_release=false")
         return 0
     except (ReleaseError, asc.ASCError, stage.StageError, OSError, ValueError, KeyError) as error:
         print(f"APP_REVIEW_RELEASE_BLOCKED: {error}", file=sys.stderr)
